@@ -52,6 +52,8 @@ The current implementation does not yet perform distributed model training or au
 
 ## Roadmap
 
+See [PROJECT_PLAN.md](PROJECT_PLAN.md) for execution milestones, completion gates, experiment rules, and a proposed schedule.
+
 - [x] Define research questions and experimental methodology
 - [x] Initialize project repository
 - [x] Implement initial peer-selection functions
