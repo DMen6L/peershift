@@ -116,29 +116,26 @@ Complete when another team member can reproduce a representative experiment and 
 
 Equal exchanges do not imply equal bytes or wall-clock time. Report those costs separately, including policy-specific metadata. Real-training runs have no automatic ground-truth label for collapse, so do not claim detector precision/recall without an independently justified labeling procedure.
 
-## Suggested execution order and schedule
+## Approved incremental execution order
 
-Use milestone gates to control scope. The following six-week sequence is provisional until the deadline, team availability, and compute budget are known:
+1. **Current increment:** deterministic Top-K selection simulation only. Preserve existing selection and metrics; add seeded randomness, bounded histories, TOML configuration, JSONL logs, and focused tests. No policy registry or ML dependencies.
+2. Add uniform-random and fixed exploration outside the Top-K pool. The existing history-based exploration primitive remains distinct.
+3. Add PyTorch MNIST gossip learning: configurable small MLP, ten clients by default, IID/non-IID partitions, identical initialization, and fixed local steps. Begin with Top-K and random, then fixed exploration.
+4. Add synthetic detector tests and adaptive Normal/Exploring/Cooldown control, requiring concentration AND validation stagnation.
+5. Investigate SONAR or independent-client transport, then network experiments and final evaluation.
 
-| Week | Main outcome |
-| --- | --- |
-| 1 | M0 and M1: runnable package and reproducible simulation |
-| 2 | M2: detector/controller; framework compatibility spike from M4 |
-| 3 | M3: real learning with four comparable policies |
-| 4 | M4: distributed deployment and verified cost instrumentation |
-| 5 | M5: final experiments and ablations |
-| 6 | M6: analysis, reproduction check, report, and demo |
+For gossip learning, all clients train before selection/exchange. Aggregate receiver-side from immutable post-training snapshots, with default weights 0.5 own and 0.5 selected peer. The selected peer is not automatically updated. Use replaceable negative flattened-parameter distance initially. Keep training, controller-validation, and test data separate.
 
-Do not start a large parameter sweep until the small learning experiment and instrumentation pass their gates. If time is limited, reduce datasets, model size, network profiles, and tuning breadth before reducing baseline fairness or reproducibility. Any omitted distributed/network work narrows the systems-cost conclusions and must be stated in the report.
+These increments supersede the earlier milestone numbering as the execution order. Future milestones are documentation only until separately requested. No calendar commitment is assumed.
 
-## Decisions to settle before M3
+## Current simulator usage
 
-- Submission deadline, team responsibilities, and available CPU/GPU resources.
-- Dataset/model, client count, non-IID partition strategy, and rounds/local steps based on a pilot runtime measurement.
-- Similarity definition and the cost of obtaining it.
-- Rolling-window sizes, thresholds, patience, exploration probability, and cooldown, selected using validation experiments.
-- SONAR feasibility and the fallback transport path.
+From the repository root:
 
-## First implementation slice
+```sh
+uv sync --project backend --locked
+uv run --project backend peershift simulate --config backend/configs/default.toml --output /tmp/peershift-run
+uv run --project backend pytest backend/tests
+```
 
-Start with M0 and M1: resolve packaging, introduce seeded policy interfaces, add a configurable selection-only runner, save structured metrics, and document one reproducible command. This creates the harness needed to develop the detector without conflating it with training or networking failures.
+The output directory must be empty. Logs represent selections, not network transfers. Identical seeds/configurations reproduce logs in the same supported environment.

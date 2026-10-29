@@ -38,9 +38,10 @@ The final implementation will evaluate these components within a decentralized t
 
 ## Current Progress
 
-**Stage: Initial Prototype**
+**Stage: Reproducible Top-K Selection Simulator**
 
 Implemented:
+- Configurable deterministic selection simulation with rolling histories and JSONL logs
 - Basic similarity-based Top-K peer selection
 - Selection of peers outside recent collaboration history
 - Normalized peer entropy calculation
@@ -89,3 +90,5 @@ Experiments will use reproducible configurations and consistent communication bu
 ## Project Status
 
 PeerShift is currently under active development. Initial implementations are prototypes intended to support subsequent distributed learning experiments.
+
+Run instructions are in [backend/README.md](backend/README.md). Only the simulator foundation is implemented; remaining milestones are future work.
