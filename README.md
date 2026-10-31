@@ -92,3 +92,9 @@ Experiments will use reproducible configurations and consistent communication bu
 PeerShift is currently under active development. Initial implementations are prototypes intended to support subsequent distributed learning experiments.
 
 Run instructions are in [backend/README.md](backend/README.md). Only the simulator foundation is implemented; remaining milestones are future work.
+
+### Selection baseline configurations
+
+Use `backend/configs/top_k.toml`, `backend/configs/random.toml`, or `backend/configs/fixed_exploration.toml` with the existing simulate command, each into a separate empty output directory. All three use matching seeds and selection budgets.
+
+`policy` defaults to `top_k`; `exploration_probability` defaults to 0.1 and applies only to `fixed_exploration`. Random selection samples any eligible peer. Fixed exploration samples outside Top-K with that probability, otherwise inside Top-K. If no outside candidates exist it falls back to Top-K. Logs include `policy`, `selection_branch`, and nullable `fallback_reason`. Diversity differences do not establish learning benefits; training and adaptive control remain future work.

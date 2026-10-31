@@ -8,10 +8,9 @@ The final deliverable is a reproducible research prototype, experiment results, 
 
 ## Current baseline
 
-- Implemented: randomized selection from the K most similar peers, exploration outside supplied history, normalized peer entropy, and consecutive repetition rate.
-- Missing: simulation runner, rolling client state, validation monitoring, adaptive controller, learning and aggregation, peer transport, network experiments, and result analysis.
-- The current `top_k_select` returns one peer from a Top-K pool; K is not the number of exchanges per round. Preserve this distinction in all baselines.
-- Setup issues to resolve: documentation imports `peershift`, but the package is named `backend`; the CLI prints a placeholder message; Python is constrained to `>=3.15` and there are no declared runtime dependencies. Select a Python version after checking the chosen training stack's compatibility.
+Implemented: runnable `peershift` package and CLI, seeded selection-only simulation, Top-K/random/fixed-exploration policies, bounded histories, entropy/repetition/unique-peer metrics, resolved TOML configuration and JSONL logs. History-based exploration remains a separate primitive. Python 3.12 is the development baseline with a dependency lockfile.
+
+Missing: actual model training and aggregation, validation monitoring, adaptive control, transport, and network experiments. Selection counts are not network transfers. K is the candidate pool size, not the number of peers selected.
 
 ## Goals and boundaries
 
@@ -119,7 +118,7 @@ Equal exchanges do not imply equal bytes or wall-clock time. Report those costs 
 ## Approved incremental execution order
 
 1. **Current increment:** deterministic Top-K selection simulation only. Preserve existing selection and metrics; add seeded randomness, bounded histories, TOML configuration, JSONL logs, and focused tests. No policy registry or ML dependencies.
-2. Add uniform-random and fixed exploration outside the Top-K pool. The existing history-based exploration primitive remains distinct.
+2. **Implemented:** uniform-random and fixed exploration outside the Top-K pool. The existing history-based exploration primitive remains distinct.
 3. Add PyTorch MNIST gossip learning: configurable small MLP, ten clients by default, IID/non-IID partitions, identical initialization, and fixed local steps. Begin with Top-K and random, then fixed exploration.
 4. Add synthetic detector tests and adaptive Normal/Exploring/Cooldown control, requiring concentration AND validation stagnation.
 5. Investigate SONAR or independent-client transport, then network experiments and final evaluation.

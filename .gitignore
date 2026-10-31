@@ -3,3 +3,6 @@ PeerShift_Project_Proposal_Group_104.pdf
 .venv/
 __pycache__/
 .pytest_cache/
+
+.codex/
+AGENTS.md

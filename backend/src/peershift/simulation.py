@@ -6,7 +6,7 @@ from pathlib import Path
 import random
 import tomllib
 
-from .selection import top_k_select
+from .selection import select_peer
 from .detector import peer_entropy, repetition_rate
 
 
@@ -18,13 +18,22 @@ class Config:
     k: int = 2
     history_window: int = 20
 
+    policy: str = "top_k"
+    exploration_probability: float = 0.1
+
     def __post_init__(self):
-        if any(type(getattr(self, f.name)) is not int for f in fields(self)):
+        if any(type(getattr(self, f.name)) is not int for f in fields(self) if f.name not in ("policy", "exploration_probability")):
             raise ValueError('All configuration values must be integers')
         if self.num_clients < 2 or self.rounds < 1 or self.history_window < 1:
             raise ValueError('Need at least two clients and positive rounds/history window')
         if not 1 <= self.k < self.num_clients:
             raise ValueError('K must be between 1 and the eligible peer count')
+
+        if self.policy not in ("top_k", "random", "fixed_exploration"):
+            raise ValueError("Unknown selection policy")
+        p = self.exploration_probability
+        if type(p) not in (int, float) or not 0 <= p <= 1:
+            raise ValueError("Exploration probability must be between zero and one")
 
     @classmethod
     def load(cls, path):
@@ -46,12 +55,17 @@ def simulate(config):
             scores[i][j] = scores[j][i] = source.random()
     clients = [ClientState(i, deque(maxlen=config.history_window)) for i in range(config.num_clients)]
     streams = [random.Random(f'{config.seed}:client:{i}') for i in range(config.num_clients)]
+    exploration_streams = [random.Random(f"{config.seed}:exploration:{i}") for i in range(config.num_clients)]
     for round_index in range(config.rounds):
         for client in clients:
-            peer = top_k_select(client.client_id, scores[client.client_id], config.k,
-                                rng=streams[client.client_id])
+            decision = select_peer(client.client_id, scores[client.client_id], config.k,
+                                rng=streams[client.client_id], policy=config.policy,
+                                exploration_probability=config.exploration_probability,
+                                exploration_rng=exploration_streams[client.client_id])
+            peer = decision.selected_peer
             client.history.append(peer)
-            yield dict(round=round_index, client=client.client_id, selected_peer=peer,
+            yield dict(policy=config.policy, selection_branch=decision.selection_branch,
+                       fallback_reason=decision.fallback_reason, round=round_index, client=client.client_id, selected_peer=peer,
                        entropy=peer_entropy(client.history, config.num_clients - 1),
                        repetition_rate=repetition_rate(client.history),
                        unique_peers=len(set(client.history)))
@@ -62,7 +76,7 @@ def run(config, output):
     output.mkdir(parents=True, exist_ok=True)
     if any(output.iterdir()):
         raise ValueError('Output directory must be empty')
-    (output / 'config.toml').write_text(''.join(f'{key} = {value}\n' for key, value in asdict(config).items()))
+    (output / 'config.toml').write_text(''.join(f'{key} = {json.dumps(value)}\n' for key, value in asdict(config).items()))
     with (output / 'selections.jsonl').open('w') as stream:
         for record in simulate(config):
             stream.write(json.dumps(record, sort_keys=True) + '\n')
