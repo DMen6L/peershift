@@ -10,7 +10,7 @@ The final deliverable is a reproducible research prototype, experiment results, 
 
 Implemented: runnable `peershift` package and CLI, seeded selection-only simulation, Top-K/random/fixed-exploration policies, bounded histories, entropy/repetition/unique-peer metrics, resolved TOML configuration and JSONL logs. History-based exploration remains a separate primitive. Python 3.12 is the development baseline with a dependency lockfile.
 
-Missing: actual model training and aggregation, validation monitoring, adaptive control, transport, and network experiments. Selection counts are not network transfers. K is the candidate pool size, not the number of peers selected.
+Implemented additionally: minimal IID MNIST training and snapshot aggregation for Top-K/random. Missing: non-IID learning, fixed-exploration learning comparisons, validation monitoring, adaptive control, transport, and network experiments. Selection counts are not network transfers. K is the candidate pool size, not the number of peers selected.
 
 ## Goals and boundaries
 
@@ -138,3 +138,14 @@ uv run --project backend pytest backend/tests
 ```
 
 The output directory must be empty. Logs represent selections, not network transfers. Identical seeds/configurations reproduce logs in the same supported environment.
+
+## Minimal IID gossip learning
+
+Implemented CPU MNIST MLP training with Top-K/random selection, separate local validation and held-out test data, and receiver-side averaging from immutable post-training snapshots. Existing selection simulation remains available without ML dependencies. Non-IID, adaptive control, and networking remain future work.
+
+```sh
+uv sync --project backend --extra learning --locked
+uv run --project backend --extra learning peershift train --config backend/configs/train_top_k.toml --output /tmp/peershift-learning --download
+```
+
+Use train_random.toml for the paired random baseline. Default settings: 10 clients, 10 rounds, 10 local steps, batch size 32, learning rate .05, own weight .5, hidden size 128, 500 training and 100 validation examples per client, 1000 test examples. All settings are configurable; only mnist/mlp/iid/cpu and top_k/random are supported for training. Data lives in backend/data by default. Omit --download once cached. Outputs include resolved configuration, exact partitions, environment/initial-model fingerprint, selection and evaluation JSONL, and summary counts/runtime. Round -1 denotes initial evaluation. Estimated parameter payload excludes similarity discovery and transport overhead; no network traffic occurs. Similarity uses full snapshot access as a simulation assumption. Same-environment reproducibility excludes runtime.
