@@ -1,6 +1,6 @@
 # PeerShift simulator
 
-A selection-only research foundation, using Python 3.12 or later. No model training or networking is performed.
+Peer-selection simulation and minimal IID CPU gossip learning, using Python 3.12 or later. Training is available through the optional learning dependencies.
 
 From the repository root:
 
@@ -40,3 +40,14 @@ Use train_random.toml for the paired random baseline. Default settings: 10 clien
 Training now writes aggregation.jsonl and summary.txt. Each client is evaluated on the same local validation examples immediately before and after averaging. Benefit is before-loss minus after-loss: positive indicates immediate improvement, negative worsening. Logs include selected-peer L2 distance and collaboration history metrics from preceding rounds. These diagnostics do not influence selection or establish harmful collapse. Summary counts use 1e-8 tolerance for unchanged results; additional validation time is recorded separately. Estimated model bytes and exchange counts retain their previous meaning.
 
 After the documented training command, inspect `cat <output-directory>/summary.txt` and `head -n 3 <output-directory>/aggregation.jsonl`. Non-IID learning, fixed-exploration learning comparisons, adaptive control and networking remain future work.
+
+## Test verification modes
+
+The lightweight command above permits learning tests to skip when PyTorch is absent. For any learning or diagnostic change, require working learning dependencies explicitly:
+
+```sh
+uv sync --project backend --extra learning --locked
+uv run --project backend --extra learning pytest backend/tests --require-learning
+```
+
+This command fails with an installation hint if torch or torchvision cannot import. A green learning verification must have no skipped learning modules. The suite checks actual model tensors against a small evaluation-free gossip reference, audits training/validation/test sample access using distinct offline datasets, and verifies benefit signs, tolerance boundaries and history eviction. These checks need no Git history or MNIST download. They establish mechanics, not research conclusions about exploration.

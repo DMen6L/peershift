@@ -74,6 +74,16 @@ def cycle(loader):
         yield from loader
 
 
+def _benefit_summary(benefits):
+    """Classify immediate benefits using the documented numerical tolerance."""
+    return dict(
+        mean_aggregation_benefit=sum(benefits)/len(benefits),
+        improved=sum(b > 1e-8 for b in benefits),
+        worsened=sum(b < -1e-8 for b in benefits),
+        unchanged=sum(abs(b) <= 1e-8 for b in benefits),
+    )
+
+
 def run_training(config, output, datasets=None, download=False):
     output = Path(output)
     if output.exists() and any(output.iterdir()):
@@ -147,13 +157,13 @@ def run_training(config, output, datasets=None, download=False):
                     validation_loss_after_aggregation=after[i],aggregation_benefit=benefit,
                     selected_peer_distance=-scores[i][d.selected_peer],**prior[i]))+'\n')
     exchanges=config.rounds*config.num_clients
-    counts=dict(improved=sum(b>1e-8 for b in benefits),worsened=sum(b < -1e-8 for b in benefits),
-                unchanged=sum(abs(b)<=1e-8 for b in benefits))
+    benefit_summary = _benefit_summary(benefits)
+    counts = {name: benefit_summary[name] for name in ('improved', 'worsened', 'unchanged')}
     summary=dict(local_steps=exchanges*config.local_steps,logical_model_exchanges=exchanges,
                  estimated_parameter_payload_bytes=exchanges*sum(v.numel()*v.element_size() for v in initial.values()),
                  runtime_seconds=time.perf_counter()-started,
                  additional_validation_seconds=additional_validation_seconds,
-                 mean_aggregation_benefit=sum(benefits)/len(benefits),**counts)
+                 **benefit_summary)
     (output/'summary.json').write_text(json.dumps(summary))
     lines=[f'Policy: {config.policy}; clients: {config.num_clients}; rounds: {config.rounds}; exchanges: {exchanges}',
            f'Mean immediate validation benefit: {summary["mean_aggregation_benefit"]:.8f}']
