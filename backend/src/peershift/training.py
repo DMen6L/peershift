@@ -110,22 +110,56 @@ def run_training(config, output, datasets=None, download=False):
     (output/'partitions.json').write_text(json.dumps(dict(clients=partitions,test=test_indices[:config.test_samples])))
     fingerprint=hashlib.sha256(b''.join(v.numpy().tobytes() for v in initial.values())).hexdigest()
     (output/'manifest.json').write_text(json.dumps(dict(python=platform.python_version(),torch=torch.__version__,torchvision=version("torchvision"),initial_model=fingerprint)))
+    benefits=[]
+    additional_validation_seconds=0.0
     started=time.perf_counter()
-    with (output/'evaluations.jsonl').open('w') as evaluations, (output/'selections.jsonl').open('w') as selections:
+    with (output/'evaluations.jsonl').open('w') as evaluations, (output/'selections.jsonl').open('w') as selections, (output/'aggregation.jsonl').open('w') as diagnostics:
         def record(round_index):
+            validation_losses=[]
             for i,c in enumerate(clients):
                 val,_=evaluate(c.model,c.validation); loss,accuracy=evaluate(c.model,test_loader)
+                validation_losses.append(val)
                 evaluations.write(json.dumps(dict(round=round_index,client=i,validation_loss=val,test_loss=loss,test_accuracy=accuracy))+'\n')
+            return validation_losses
         record(-1)
         for round_index in range(config.rounds):
             for c in clients:
                 local_train(c.model,c.optimizer,c.batches,config.local_steps)
             states=[snapshot(c.model) for c in clients]; scores=similarities(states)
+            evaluation_started=time.perf_counter()
+            before=[evaluate(c.model,c.validation)[0] for c in clients]
+            additional_validation_seconds += time.perf_counter()-evaluation_started
+            prior=[dict(history_length_before_selection=len(c.history),
+                        entropy_before_selection=peer_entropy(c.history,config.num_clients-1),
+                        repetition_rate_before_selection=repetition_rate(c.history),
+                        unique_peers_before_selection=len(set(c.history))) for c in clients]
             decisions=[select_peer(i,scores[i],config.k,policy=config.policy,rng=streams[i]) for i in range(config.num_clients)]
             for i,(c,d) in enumerate(zip(clients,decisions)):
                 aggregate(c.model,states[i],states[d.selected_peer],config.own_weight)
                 c.history.append(d.selected_peer)
                 selections.write(json.dumps(dict(round=round_index,client=i,policy=config.policy,selected_peer=d.selected_peer,selection_branch=d.selection_branch,fallback_reason=d.fallback_reason,entropy=peer_entropy(c.history,config.num_clients-1),repetition_rate=repetition_rate(c.history),unique_peers=len(set(c.history))))+'\n')
-            record(round_index)
+            after=record(round_index)
+            for i,d in enumerate(decisions):
+                benefit=before[i]-after[i]
+                benefits.append(benefit)
+                diagnostics.write(json.dumps(dict(round=round_index,client=i,selected_peer=d.selected_peer,
+                    policy=config.policy,validation_loss_before_aggregation=before[i],
+                    validation_loss_after_aggregation=after[i],aggregation_benefit=benefit,
+                    selected_peer_distance=-scores[i][d.selected_peer],**prior[i]))+'\n')
     exchanges=config.rounds*config.num_clients
-    (output/'summary.json').write_text(json.dumps(dict(local_steps=exchanges*config.local_steps,logical_model_exchanges=exchanges,estimated_parameter_payload_bytes=exchanges*sum(v.numel()*v.element_size() for v in initial.values()),runtime_seconds=time.perf_counter()-started)))
+    counts=dict(improved=sum(b>1e-8 for b in benefits),worsened=sum(b < -1e-8 for b in benefits),
+                unchanged=sum(abs(b)<=1e-8 for b in benefits))
+    summary=dict(local_steps=exchanges*config.local_steps,logical_model_exchanges=exchanges,
+                 estimated_parameter_payload_bytes=exchanges*sum(v.numel()*v.element_size() for v in initial.values()),
+                 runtime_seconds=time.perf_counter()-started,
+                 additional_validation_seconds=additional_validation_seconds,
+                 mean_aggregation_benefit=sum(benefits)/len(benefits),**counts)
+    (output/'summary.json').write_text(json.dumps(summary))
+    lines=[f'Policy: {config.policy}; clients: {config.num_clients}; rounds: {config.rounds}; exchanges: {exchanges}',
+           f'Mean immediate validation benefit: {summary["mean_aggregation_benefit"]:.8f}']
+    lines.extend(f'{name.capitalize()}: {count} ({100*count/exchanges:.1f}%)' for name,count in counts.items())
+    lines.extend([f'Runtime: {summary["runtime_seconds"]:.4f} seconds',
+                  f'Additional pre-aggregation validation time: {additional_validation_seconds:.4f} seconds',
+                  'Benefit = validation loss before minus after averaging. Positive means immediate local improvement.',
+                  'Unchanged uses absolute tolerance 1e-8. These observations do not establish collapse or long-term benefit.'])
+    (output/'summary.txt').write_text('\n'.join(lines)+'\n')

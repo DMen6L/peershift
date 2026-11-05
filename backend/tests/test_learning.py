@@ -97,5 +97,5 @@ main()
 '''
     for name in ('one','two'):
         subprocess.run([sys.executable,'-c',script,str(config),str(tmp_path/name)],check=True,capture_output=True)
-    for artifact in ('selections.jsonl','evaluations.jsonl','partitions.json'):
+    for artifact in ('selections.jsonl','evaluations.jsonl','partitions.json','aggregation.jsonl'):
         assert (tmp_path/'one'/artifact).read_bytes()==(tmp_path/'two'/artifact).read_bytes()

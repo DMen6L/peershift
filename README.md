@@ -30,7 +30,7 @@ The final implementation will evaluate these components within a decentralized t
 ## Technologies
 
 - Python — Core implementation
-- PyTorch — Planned machine learning framework
+- PyTorch — Implemented CPU learning framework
 - SONAR — Target framework for decentralized learning experiments, subject to integration verification
 - Docker Compose — Planned multi-container deployment
 - Linux NetEm — Planned network latency and bandwidth simulation
@@ -83,7 +83,7 @@ Experiments will use reproducible configurations and consistent communication bu
 
 ## Research References
 
-1. Singh et al. (2026). *SONAR: Benchmarking Topology and Collaboration in Decentralized Learning.*
+1. Yuan et al. (2026). *SONAR: Benchmarking Topology and Collaboration in Decentralized Learning.*
 2. Cox et al. (2026). *Dynamic Topology Optimization for Non-IID Data in Decentralized Learning (Morph).*
 3. Masmoudi and Jaafar (2024). *OCD-FL: A Novel Communication-Efficient Peer Selection-based Decentralized Federated Learning.*
 
@@ -109,3 +109,9 @@ uv run --project backend --extra learning peershift train --config backend/confi
 ```
 
 Use train_random.toml for the paired random baseline. Default settings: 10 clients, 10 rounds, 10 local steps, batch size 32, learning rate .05, own weight .5, hidden size 128, 500 training and 100 validation examples per client, 1000 test examples. All settings are configurable; only mnist/mlp/iid/cpu and top_k/random are supported for training. Data lives in backend/data by default. Omit --download once cached. Outputs include resolved configuration, exact partitions, environment/initial-model fingerprint, selection and evaluation JSONL, and summary counts/runtime. Round -1 denotes initial evaluation. Estimated parameter payload excludes similarity discovery and transport overhead; no network traffic occurs. Similarity uses full snapshot access as a simulation assumption. Same-environment reproducibility excludes runtime.
+
+## Immediate exchange measurements
+
+Training now writes aggregation.jsonl and summary.txt. Each client is evaluated on the same local validation examples immediately before and after averaging. Benefit is before-loss minus after-loss: positive indicates immediate improvement, negative worsening. Logs include selected-peer L2 distance and collaboration history metrics from preceding rounds. These diagnostics do not influence selection or establish harmful collapse. Summary counts use 1e-8 tolerance for unchanged results; additional validation time is recorded separately. Estimated model bytes and exchange counts retain their previous meaning.
+
+After the documented training command, inspect `cat <output-directory>/summary.txt` and `head -n 3 <output-directory>/aggregation.jsonl`. Non-IID learning, fixed-exploration learning comparisons, adaptive control and networking remain future work.
