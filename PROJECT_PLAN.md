@@ -21,6 +21,8 @@ Implemented additionally: minimal IID MNIST training and snapshot aggregation fo
 
 Start with a single dataset, small model, synchronous rounds, and static client membership. A single-process simulator may coordinate execution, but clients must select peers and aggregate locally without a central model aggregator. Asynchronous training, client churn, privacy mechanisms, production deployment, and a web interface are outside the initial scope.
 
+**Mandatory distributed execution requirement:** implement the future distributed simulator using MPI through `mpi4py`, with one rank per client. Each rank owns its model, optimizer, data partition, peer history, and eventual controller state. Real MPI messages must carry peer model parameters; an in-process loop or containers alone do not satisfy this requirement. The current single-process implementation remains the reference for correctness. MPI dependencies and execution code will be added in the distributed milestone, not in this documentation increment.
+
 ## Milestones and completion gates
 
 ### M0 — Establish a runnable foundation
@@ -67,16 +69,22 @@ Tasks:
 
 Complete when every client trains and aggregates peer models, a small end-to-end experiment is reproducible, and accuracy/loss can be plotted alongside collaboration metrics and controller events.
 
-### M4 — Verify framework integration and distributed execution
+### M4 — Implement MPI distributed simulation
 
 Tasks:
-- Conduct a time-boxed SONAR integration spike before committing to framework-specific implementation. Verify peer-selection hooks, aggregation semantics, reproducibility, and required network deployment support.
-- Record the integration decision. If essential hooks are unavailable, retain the simulator as the experiment harness and implement a minimal process/container transport adapter.
-- Separate policy and detector code from training and transport adapters.
-- Run a small Docker Compose deployment with independent client models and local aggregation.
-- Record messages, bytes, failures, timing, and round completion. Define timeout and failure behavior.
+- Add the required MPI execution backend using `mpi4py`, with dependencies in an optional install extra so the single-process reference remains lightweight. Document a supported MPI runtime and launcher. Require the rank count to equal the configured client count; use stable rank-to-client mapping.
+- Reuse selection, detection, training, and averaging logic through a separate MPI transport/round coordinator. Each rank trains locally; all ranks finish local training before exchanges use immutable post-training snapshots from that round.
+- Transfer selected peers' snapshot parameters through MPI and aggregate only at the receiver, preserving one peer selection per client per round. A rank must serve all incoming requests, including multiple clients selecting the same peer.
+- Use a protocol that completes sends/receives without deadlock for cycles, mutual selections, and many-to-one requests; keep snapshot buffers immutable until communication completes. Define mismatched-round detection and job termination behavior.
+- Keep peer selection and model aggregation local to each rank. Rank zero may distribute configuration/initial weights and collect logs, but must not average client models or choose all clients' peers. Collectives for synchronization and metadata are permitted.
+- Specify how similarity information becomes available across ranks before implementation. Count any discovery messages or additional model transfers separately; the current free access to all models cannot be assumed in MPI or hidden from budget comparisons.
+- Record model payload, discovery/control bytes and messages, runtime, and round duration separately. Distinguish application-level payload measurements from wire-level overhead.
+- Verify a small multi-rank run on one host against the single-process reference using paired initialization, partitions, minibatches, and policy seeds. Document multi-host execution for later network experiments.
+- Treat SONAR as optional: integrate only if it preserves MPI transport and the required learning semantics. Docker Compose may package an MPI deployment later, but does not replace MPI.
 
-Complete when a multi-client distributed training run finishes with auditable exchange counts and model updates, and matches simulator behavior within documented numerical and scheduling differences.
+Complete when at least three MPI client ranks complete training with actual peer messages, including cyclic, many-to-one, zero-incoming, and large-payload checks with timeouts to detect hangs, auditable communication counts, and reproducible per-client outputs. Verify selections and model updates against the single-process reference with documented floating-point tolerances. Deliver MPI launch instructions; claim multi-host/network results only after separately validating them.
+
+See the [MPI requirements review](docs/research/2026-11-06-mpi-requirements.md) for official communication references and protocol questions to resolve before implementation.
 
 ### M5 — Run controlled learning and network experiments
 
@@ -121,7 +129,7 @@ Equal exchanges do not imply equal bytes or wall-clock time. Report those costs 
 2. **Implemented:** uniform-random and fixed exploration outside the Top-K pool. The existing history-based exploration primitive remains distinct.
 3. Add PyTorch MNIST gossip learning: configurable small MLP, ten clients by default, IID/non-IID partitions, identical initialization, and fixed local steps. Begin with Top-K and random, then fixed exploration.
 4. Add synthetic detector tests and adaptive Normal/Exploring/Cooldown control, requiring concentration AND validation stagnation.
-5. Investigate SONAR or independent-client transport, then network experiments and final evaluation.
+5. Implement the required MPI/mpi4py execution path with one rank per client, then network experiments and final evaluation. SONAR is optional and must preserve MPI execution.
 
 For gossip learning, all clients train before selection/exchange. Aggregate receiver-side from immutable post-training snapshots, with default weights 0.5 own and 0.5 selected peer. The selected peer is not automatically updated. Use replaceable negative flattened-parameter distance initially. Keep training, controller-validation, and test data separate.
 

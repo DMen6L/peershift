@@ -18,6 +18,8 @@ The `peershift.selection` module retains Top-K and history-based exploration pri
 
 See [the execution plan](../PROJECT_PLAN.md) for subsequent baseline, learning, adaptive-control, and distributed milestones.
 
+The distributed milestone requires MPI via `mpi4py`: one process per client, real peer model messages, and local receiver-side averaging. Current commands remain single-process; MPI launch support and optional dependencies will be added later. The existing simulator will serve as the parity reference for that implementation.
+
 ### Selection baseline configurations
 
 Use `backend/configs/top_k.toml`, `backend/configs/random.toml`, or `backend/configs/fixed_exploration.toml` with the existing simulate command, each into a separate empty output directory. All three use matching seeds and selection budgets.

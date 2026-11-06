@@ -27,12 +27,15 @@ PeerShift introduces two additional components:
 
 The final implementation will evaluate these components within a decentralized training environment.
 
+**Required future execution model: MPI.** The distributed simulator must use `mpi4py`, with one MPI process (rank) per client and actual model-parameter messages between peers. Each rank owns its model, optimizer, data partition, and selection history, and performs receiver-side aggregation locally. The existing single-process simulator remains the correctness reference. MPI is a future requirement; it is not implemented or installed by the current project.
+
 ## Technologies
 
 - Python — Core implementation
 - PyTorch — Implemented CPU learning framework
-- SONAR — Target framework for decentralized learning experiments, subject to integration verification
-- Docker Compose — Planned multi-container deployment
+- MPI / mpi4py — Required future multi-process distributed simulation
+- SONAR — Optional integration, only if compatible with the required MPI execution model
+- Docker Compose — Optional later packaging for MPI clients
 - Linux NetEm — Planned network latency and bandwidth simulation
 - Matplotlib / NetworkX — Experimental visualization
 
@@ -62,7 +65,8 @@ See [PROJECT_PLAN.md](PROJECT_PLAN.md) for execution milestones, completion gate
 - [x] Build a reproducible multi-client simulation
 - [ ] Implement validation-plateau detection
 - [ ] Implement adaptive exploration and recovery logic
-- [ ] Integrate with a decentralized learning framework
+- [ ] Implement MPI execution with one process per client and real peer model messages
+- [ ] Evaluate optional framework integration compatible with MPI
 - [ ] Run multi-client training experiments
 - [ ] Simulate heterogeneous network conditions
 - [ ] Evaluate accuracy, collaboration diversity, and communication overhead
