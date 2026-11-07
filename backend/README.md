@@ -1,109 +1,55 @@
-# PeerShift Backend
+# PeerShift simulator
 
-The backend contains the core algorithms for peer selection and collaboration monitoring in PeerShift.
+Peer-selection simulation and minimal IID CPU gossip learning, using Python 3.12 or later. Training is available through the optional learning dependencies.
 
-At the current development stage, these components operate independently of actual decentralized model training.
+From the repository root:
 
-## Implemented Components
-
-### 1. Peer Selection (`selection.py`)
-
-Provides two peer-selection functions.
-
-**`top_k_select(client_id, similarities, k=2)`**
-
-Implements simplified similarity-based peer selection.
-
-- Excludes the current client from the candidate list.
-- Sorts other clients by their similarity scores.
-- Constructs a pool containing the K most similar peers.
-- Randomly selects one peer from that pool.
-
-**`explore_select(client_id, similarities, history, k=2)`**
-
-Implements basic exploration outside recent collaboration history.
-
-- Identifies peers that do not appear in the supplied history.
-- Randomly selects an available unexplored peer.
-- Falls back to Top-K selection if no unexplored candidates remain.
-
-This is an exploration primitive, not yet the complete adaptive PeerShift policy.
-
-### 2. Collaboration Monitoring (`detector.py`)
-
-Provides metrics used to identify potentially concentrated collaboration.
-
-**`peer_entropy(history, total_peers)`**
-
-Calculates normalized Shannon entropy over peer-selection history.
-
-\[
-H=-\frac{\sum_{i=1}^{N}p_i\ln p_i}{\ln N}
-\]
-
-Where:
-- \(p_i\) is the proportion of selections assigned to peer \(i\).
-- \(N\) is the number of available peer candidates.
-
-Interpretation:
-- Values near 0 indicate concentrated selection.
-- Values near 1 indicate a relatively uniform distribution.
-
-**`repetition_rate(history)`**
-
-Measures the proportion of consecutive selections that choose the same peer.
-
-\[
-R=\frac{\sum_{t=2}^{T}\mathbf{1}(p_t=p_{t-1})}{T-1}
-\]
-
-Where \(p_t\) is the peer selected at round \(t\).
-
-Higher values indicate more frequent consecutive repetition.
-
-These metrics describe collaboration patterns but do not independently establish harmful collaborator collapse.
-
-## Example Usage
-
-```python
-from peershift.selection import top_k_select, explore_select
-from peershift.detector import peer_entropy, repetition_rate
-
-similarities = [1.0, 0.9, 0.8, 0.3, 0.2, 0.1]
-client_id = 0
-
-peer = top_k_select(client_id, similarities, k=2)
-print("Selected peer:", peer)
-
-history = [1, 1, 1, 2, 1, 1]
-
-print("Peer entropy:", peer_entropy(history, 5))
-print("Repetition rate:", repetition_rate(history))
-
-new_peer = explore_select(client_id, similarities, history, k=2)
-print("Exploration peer:", new_peer)
+```sh
+uv sync --project backend --locked
+uv run --project backend peershift simulate --config backend/configs/default.toml --output /tmp/peershift-run
+uv run --project backend pytest backend/tests
 ```
 
-The example assumes the `peershift` package is available on the Python import path.
+The output directory must be empty. Configuration controls seed, client count, rounds, K, and rolling history size. K defines the pool of similar candidates; each client selects one peer per round.
 
-## Current Limitations
+The simulator generates a seeded symmetric similarity matrix, keeps it fixed, and uses independent per-client random streams. Equal-score ties use client ID ordering. Outputs are resolved `config.toml` and deterministic `selections.jsonl` records with round, client, peer, entropy, repetition rate, and unique peers. Metrics include the current selection and use bounded history; entropy is normalized over all eligible peers.
 
-- No model training or gradient exchange
-- No actual peer-to-peer communication
-- No validation-loss plateau detection
-- No automated adaptive exploration controller
-- No communication-cost measurements
-- No distributed execution
+The `peershift.selection` module retains Top-K and history-based exploration primitives. `peershift.detector` provides entropy and repetition metrics. History-based exploration excludes recent peers; fixed exploration instead excludes the current Top-K pool.
 
-## Next Development Steps
+See [the execution plan](../PROJECT_PLAN.md) for subsequent baseline, learning, adaptive-control, and distributed milestones.
 
-1. Create a multi-client simulation with configurable client count and rounds.
-2. Record rolling peer-selection histories.
-3. Add adaptive exploration triggers and cooldown mechanisms.
-4. Introduce model training and validation tracking.
-5. Integrate peer selection with decentralized model aggregation.
-6. Support distributed execution and network-condition experiments.
+The distributed milestone requires MPI via `mpi4py`: one process per client, real peer model messages, and local receiver-side averaging. Current commands remain single-process; MPI launch support and optional dependencies will be added later. The existing simulator will serve as the parity reference for that implementation.
 
-## Development Goal
+### Selection baseline configurations
 
-The backend will eventually allow each client to independently evaluate collaboration patterns and adjust peer selection without relying on a central model aggregator.
+Use `backend/configs/top_k.toml`, `backend/configs/random.toml`, or `backend/configs/fixed_exploration.toml` with the existing simulate command, each into a separate empty output directory. All three use matching seeds and selection budgets.
+
+`policy` defaults to `top_k`; `exploration_probability` defaults to 0.1 and applies only to `fixed_exploration`. Random selection samples any eligible peer. Fixed exploration samples outside Top-K with that probability, otherwise inside Top-K. If no outside candidates exist it falls back to Top-K. Logs include `policy`, `selection_branch`, and nullable `fallback_reason`. Diversity differences do not establish learning benefits; training and adaptive control remain future work.
+
+## Minimal IID gossip learning
+
+Implemented CPU MNIST MLP training with Top-K/random selection, separate local validation and held-out test data, and receiver-side averaging from immutable post-training snapshots. Existing selection simulation remains available without ML dependencies. Non-IID, adaptive control, and networking remain future work.
+
+```sh
+uv sync --project backend --extra learning --locked
+uv run --project backend --extra learning peershift train --config backend/configs/train_top_k.toml --output /tmp/peershift-learning --download
+```
+
+Use train_random.toml for the paired random baseline. Default settings: 10 clients, 10 rounds, 10 local steps, batch size 32, learning rate .05, own weight .5, hidden size 128, 500 training and 100 validation examples per client, 1000 test examples. All settings are configurable; only mnist/mlp/iid/cpu and top_k/random are supported for training. Data lives in backend/data by default. Omit --download once cached. Outputs include resolved configuration, exact partitions, environment/initial-model fingerprint, selection and evaluation JSONL, and summary counts/runtime. Round -1 denotes initial evaluation. Estimated parameter payload excludes similarity discovery and transport overhead; no network traffic occurs. Similarity uses full snapshot access as a simulation assumption. Same-environment reproducibility excludes runtime.
+
+## Immediate exchange measurements
+
+Training now writes aggregation.jsonl and summary.txt. Each client is evaluated on the same local validation examples immediately before and after averaging. Benefit is before-loss minus after-loss: positive indicates immediate improvement, negative worsening. Logs include selected-peer L2 distance and collaboration history metrics from preceding rounds. These diagnostics do not influence selection or establish harmful collapse. Summary counts use 1e-8 tolerance for unchanged results; additional validation time is recorded separately. Estimated model bytes and exchange counts retain their previous meaning.
+
+After the documented training command, inspect `cat <output-directory>/summary.txt` and `head -n 3 <output-directory>/aggregation.jsonl`. Non-IID learning, fixed-exploration learning comparisons, adaptive control and networking remain future work.
+
+## Test verification modes
+
+The lightweight command above permits learning tests to skip when PyTorch is absent. For any learning or diagnostic change, require working learning dependencies explicitly:
+
+```sh
+uv sync --project backend --extra learning --locked
+uv run --project backend --extra learning pytest backend/tests --require-learning
+```
+
+This command fails with an installation hint if torch or torchvision cannot import. A green learning verification must have no skipped learning modules. The suite checks actual model tensors against a small evaluation-free gossip reference, audits training/validation/test sample access using distinct offline datasets, and verifies benefit signs, tolerance boundaries and history eviction. These checks need no Git history or MNIST download. They establish mechanics, not research conclusions about exploration.

@@ -1,0 +1,5 @@
+seed = 42
+num_clients = 10
+rounds = 100
+k = 2
+history_window = 20

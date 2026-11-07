@@ -8,10 +8,9 @@ The final deliverable is a reproducible research prototype, experiment results, 
 
 ## Current baseline
 
-- Implemented: randomized selection from the K most similar peers, exploration outside supplied history, normalized peer entropy, and consecutive repetition rate.
-- Missing: simulation runner, rolling client state, validation monitoring, adaptive controller, learning and aggregation, peer transport, network experiments, and result analysis.
-- The current `top_k_select` returns one peer from a Top-K pool; K is not the number of exchanges per round. Preserve this distinction in all baselines.
-- Setup issues to resolve: documentation imports `peershift`, but the package is named `backend`; the CLI prints a placeholder message; Python is constrained to `>=3.15` and there are no declared runtime dependencies. Select a Python version after checking the chosen training stack's compatibility.
+Implemented: runnable `peershift` package and CLI, seeded selection-only simulation, Top-K/random/fixed-exploration policies, bounded histories, entropy/repetition/unique-peer metrics, resolved TOML configuration and JSONL logs. History-based exploration remains a separate primitive. Python 3.12 is the development baseline with a dependency lockfile.
+
+Implemented additionally: minimal IID MNIST training and snapshot aggregation for Top-K/random. Missing: non-IID learning, fixed-exploration learning comparisons, validation monitoring, adaptive control, transport, and network experiments. Selection counts are not network transfers. K is the candidate pool size, not the number of peers selected.
 
 ## Goals and boundaries
 
@@ -21,6 +20,8 @@ The final deliverable is a reproducible research prototype, experiment results, 
 4. Make each reported result reproducible from a configuration, seed, code revision, and saved metrics.
 
 Start with a single dataset, small model, synchronous rounds, and static client membership. A single-process simulator may coordinate execution, but clients must select peers and aggregate locally without a central model aggregator. Asynchronous training, client churn, privacy mechanisms, production deployment, and a web interface are outside the initial scope.
+
+**Mandatory distributed execution requirement:** implement the future distributed simulator using MPI through `mpi4py`, with one rank per client. Each rank owns its model, optimizer, data partition, peer history, and eventual controller state. Real MPI messages must carry peer model parameters; an in-process loop or containers alone do not satisfy this requirement. The current single-process implementation remains the reference for correctness. MPI dependencies and execution code will be added in the distributed milestone, not in this documentation increment.
 
 ## Milestones and completion gates
 
@@ -68,16 +69,22 @@ Tasks:
 
 Complete when every client trains and aggregates peer models, a small end-to-end experiment is reproducible, and accuracy/loss can be plotted alongside collaboration metrics and controller events.
 
-### M4 — Verify framework integration and distributed execution
+### M4 — Implement MPI distributed simulation
 
 Tasks:
-- Conduct a time-boxed SONAR integration spike before committing to framework-specific implementation. Verify peer-selection hooks, aggregation semantics, reproducibility, and required network deployment support.
-- Record the integration decision. If essential hooks are unavailable, retain the simulator as the experiment harness and implement a minimal process/container transport adapter.
-- Separate policy and detector code from training and transport adapters.
-- Run a small Docker Compose deployment with independent client models and local aggregation.
-- Record messages, bytes, failures, timing, and round completion. Define timeout and failure behavior.
+- Add the required MPI execution backend using `mpi4py`, with dependencies in an optional install extra so the single-process reference remains lightweight. Document a supported MPI runtime and launcher. Require the rank count to equal the configured client count; use stable rank-to-client mapping.
+- Reuse selection, detection, training, and averaging logic through a separate MPI transport/round coordinator. Each rank trains locally; all ranks finish local training before exchanges use immutable post-training snapshots from that round.
+- Transfer selected peers' snapshot parameters through MPI and aggregate only at the receiver, preserving one peer selection per client per round. A rank must serve all incoming requests, including multiple clients selecting the same peer.
+- Use a protocol that completes sends/receives without deadlock for cycles, mutual selections, and many-to-one requests; keep snapshot buffers immutable until communication completes. Define mismatched-round detection and job termination behavior.
+- Keep peer selection and model aggregation local to each rank. Rank zero may distribute configuration/initial weights and collect logs, but must not average client models or choose all clients' peers. Collectives for synchronization and metadata are permitted.
+- Specify how similarity information becomes available across ranks before implementation. Count any discovery messages or additional model transfers separately; the current free access to all models cannot be assumed in MPI or hidden from budget comparisons.
+- Record model payload, discovery/control bytes and messages, runtime, and round duration separately. Distinguish application-level payload measurements from wire-level overhead.
+- Verify a small multi-rank run on one host against the single-process reference using paired initialization, partitions, minibatches, and policy seeds. Document multi-host execution for later network experiments.
+- Treat SONAR as optional: integrate only if it preserves MPI transport and the required learning semantics. Docker Compose may package an MPI deployment later, but does not replace MPI.
 
-Complete when a multi-client distributed training run finishes with auditable exchange counts and model updates, and matches simulator behavior within documented numerical and scheduling differences.
+Complete when at least three MPI client ranks complete training with actual peer messages, including cyclic, many-to-one, zero-incoming, and large-payload checks with timeouts to detect hangs, auditable communication counts, and reproducible per-client outputs. Verify selections and model updates against the single-process reference with documented floating-point tolerances. Deliver MPI launch instructions; claim multi-host/network results only after separately validating them.
+
+See the [MPI requirements review](docs/research/2026-11-06-mpi-requirements.md) for official communication references and protocol questions to resolve before implementation.
 
 ### M5 — Run controlled learning and network experiments
 
@@ -116,29 +123,43 @@ Complete when another team member can reproduce a representative experiment and 
 
 Equal exchanges do not imply equal bytes or wall-clock time. Report those costs separately, including policy-specific metadata. Real-training runs have no automatic ground-truth label for collapse, so do not claim detector precision/recall without an independently justified labeling procedure.
 
-## Suggested execution order and schedule
+## Approved incremental execution order
 
-Use milestone gates to control scope. The following six-week sequence is provisional until the deadline, team availability, and compute budget are known:
+1. **Current increment:** deterministic Top-K selection simulation only. Preserve existing selection and metrics; add seeded randomness, bounded histories, TOML configuration, JSONL logs, and focused tests. No policy registry or ML dependencies.
+2. **Implemented:** uniform-random and fixed exploration outside the Top-K pool. The existing history-based exploration primitive remains distinct.
+3. Add PyTorch MNIST gossip learning: configurable small MLP, ten clients by default, IID/non-IID partitions, identical initialization, and fixed local steps. Begin with Top-K and random, then fixed exploration.
+4. Add synthetic detector tests and adaptive Normal/Exploring/Cooldown control, requiring concentration AND validation stagnation.
+5. Implement the required MPI/mpi4py execution path with one rank per client, then network experiments and final evaluation. SONAR is optional and must preserve MPI execution.
 
-| Week | Main outcome |
-| --- | --- |
-| 1 | M0 and M1: runnable package and reproducible simulation |
-| 2 | M2: detector/controller; framework compatibility spike from M4 |
-| 3 | M3: real learning with four comparable policies |
-| 4 | M4: distributed deployment and verified cost instrumentation |
-| 5 | M5: final experiments and ablations |
-| 6 | M6: analysis, reproduction check, report, and demo |
+For gossip learning, all clients train before selection/exchange. Aggregate receiver-side from immutable post-training snapshots, with default weights 0.5 own and 0.5 selected peer. The selected peer is not automatically updated. Use replaceable negative flattened-parameter distance initially. Keep training, controller-validation, and test data separate.
 
-Do not start a large parameter sweep until the small learning experiment and instrumentation pass their gates. If time is limited, reduce datasets, model size, network profiles, and tuning breadth before reducing baseline fairness or reproducibility. Any omitted distributed/network work narrows the systems-cost conclusions and must be stated in the report.
+These increments supersede the earlier milestone numbering as the execution order. Future milestones are documentation only until separately requested. No calendar commitment is assumed.
 
-## Decisions to settle before M3
+## Current simulator usage
 
-- Submission deadline, team responsibilities, and available CPU/GPU resources.
-- Dataset/model, client count, non-IID partition strategy, and rounds/local steps based on a pilot runtime measurement.
-- Similarity definition and the cost of obtaining it.
-- Rolling-window sizes, thresholds, patience, exploration probability, and cooldown, selected using validation experiments.
-- SONAR feasibility and the fallback transport path.
+From the repository root:
 
-## First implementation slice
+```sh
+uv sync --project backend --locked
+uv run --project backend peershift simulate --config backend/configs/default.toml --output /tmp/peershift-run
+uv run --project backend pytest backend/tests
+```
 
-Start with M0 and M1: resolve packaging, introduce seeded policy interfaces, add a configurable selection-only runner, save structured metrics, and document one reproducible command. This creates the harness needed to develop the detector without conflating it with training or networking failures.
+The output directory must be empty. Logs represent selections, not network transfers. Identical seeds/configurations reproduce logs in the same supported environment.
+
+## Minimal IID gossip learning
+
+Implemented CPU MNIST MLP training with Top-K/random selection, separate local validation and held-out test data, and receiver-side averaging from immutable post-training snapshots. Existing selection simulation remains available without ML dependencies. Non-IID, adaptive control, and networking remain future work.
+
+```sh
+uv sync --project backend --extra learning --locked
+uv run --project backend --extra learning peershift train --config backend/configs/train_top_k.toml --output /tmp/peershift-learning --download
+```
+
+Use train_random.toml for the paired random baseline. Default settings: 10 clients, 10 rounds, 10 local steps, batch size 32, learning rate .05, own weight .5, hidden size 128, 500 training and 100 validation examples per client, 1000 test examples. All settings are configurable; only mnist/mlp/iid/cpu and top_k/random are supported for training. Data lives in backend/data by default. Omit --download once cached. Outputs include resolved configuration, exact partitions, environment/initial-model fingerprint, selection and evaluation JSONL, and summary counts/runtime. Round -1 denotes initial evaluation. Estimated parameter payload excludes similarity discovery and transport overhead; no network traffic occurs. Similarity uses full snapshot access as a simulation assumption. Same-environment reproducibility excludes runtime.
+
+## Immediate exchange measurements
+
+Training now writes aggregation.jsonl and summary.txt. Each client is evaluated on the same local validation examples immediately before and after averaging. Benefit is before-loss minus after-loss: positive indicates immediate improvement, negative worsening. Logs include selected-peer L2 distance and collaboration history metrics from preceding rounds. These diagnostics do not influence selection or establish harmful collapse. Summary counts use 1e-8 tolerance for unchanged results; additional validation time is recorded separately. Estimated model bytes and exchange counts retain their previous meaning.
+
+After the documented training command, inspect `cat <output-directory>/summary.txt` and `head -n 3 <output-directory>/aggregation.jsonl`. Non-IID learning, fixed-exploration learning comparisons, adaptive control and networking remain future work.
