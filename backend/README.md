@@ -18,7 +18,7 @@ The `peershift.selection` module retains Top-K and history-based exploration pri
 
 See [the execution plan](../PROJECT_PLAN.md) for subsequent baseline, learning, adaptive-control, and distributed milestones.
 
-The distributed milestone requires MPI via `mpi4py`: one process per client, real peer model messages, and local receiver-side averaging. Current commands remain single-process; MPI launch support and optional dependencies will be added later. The existing simulator will serve as the parity reference for that implementation.
+The distributed milestone requires MPI via `mpi4py`: one process per client, real peer model messages, and local receiver-side averaging. The `mpi` extra and `mpi-demo` command now provide a fixed-peer model exchange prototype; learning commands remain single-process. The existing simulator will serve as the parity reference for that implementation.
 
 ### Selection baseline configurations
 
@@ -53,3 +53,7 @@ uv run --project backend --extra learning pytest backend/tests --require-learnin
 ```
 
 This command fails with an installation hint if torch or torchvision cannot import. A green learning verification must have no skipped learning modules. The suite checks actual model tensors against a small evaluation-free gossip reference, audits training/validation/test sample access using distinct offline datasets, and verifies benefit signs, tolerance boundaries and history eviction. These checks need no Git history or MNIST download. They establish mechanics, not research conclusions about exploration.
+
+## MPI model transport
+
+See [MPI transport instructions](../docs/MPI_TRANSPORT.md) for the separate-process exchange/averaging demo and mandatory MPI verification command. Ring, many-to-one and rotating fixture choices are supported. The demo does not train models or implement distributed similarity discovery.

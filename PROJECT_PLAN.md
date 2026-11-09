@@ -10,7 +10,7 @@ The final deliverable is a reproducible research prototype, experiment results, 
 
 Implemented: runnable `peershift` package and CLI, seeded selection-only simulation, Top-K/random/fixed-exploration policies, bounded histories, entropy/repetition/unique-peer metrics, resolved TOML configuration and JSONL logs. History-based exploration remains a separate primitive. Python 3.12 is the development baseline with a dependency lockfile.
 
-Implemented additionally: minimal IID MNIST training and snapshot aggregation for Top-K/random. Missing: non-IID learning, fixed-exploration learning comparisons, validation monitoring, adaptive control, transport, and network experiments. Selection counts are not network transfers. K is the candidate pool size, not the number of peers selected.
+Implemented additionally: minimal IID MNIST training and snapshot aggregation for Top-K/random. Implemented additionally: fixed-peer MPI model transport and receiver-side averaging with real messages. Missing: non-IID learning, fixed-exploration learning comparisons, validation monitoring, adaptive control, MPI training integration, distributed discovery, and network experiments. Selection counts are not network transfers. K is the candidate pool size, not the number of peers selected.
 
 ## Goals and boundaries
 
@@ -21,7 +21,7 @@ Implemented additionally: minimal IID MNIST training and snapshot aggregation fo
 
 Start with a single dataset, small model, synchronous rounds, and static client membership. A single-process simulator may coordinate execution, but clients must select peers and aggregate locally without a central model aggregator. Asynchronous training, client churn, privacy mechanisms, production deployment, and a web interface are outside the initial scope.
 
-**Mandatory distributed execution requirement:** implement the future distributed simulator using MPI through `mpi4py`, with one rank per client. Each rank owns its model, optimizer, data partition, peer history, and eventual controller state. Real MPI messages must carry peer model parameters; an in-process loop or containers alone do not satisfy this requirement. The current single-process implementation remains the reference for correctness. MPI dependencies and execution code will be added in the distributed milestone, not in this documentation increment.
+**Mandatory distributed execution requirement:** implement the future distributed simulator using MPI through `mpi4py`, with one rank per client. Each rank owns its model, optimizer, data partition, peer history, and eventual controller state. Real MPI messages must carry peer model parameters; an in-process loop or containers alone do not satisfy this requirement. The current single-process implementation remains the reference for correctness. Optional MPI dependencies and a fixed-peer exchange demo are now implemented. MPI training and similarity-discovery integration remain future increments.
 
 ## Milestones and completion gates
 
@@ -70,6 +70,8 @@ Tasks:
 Complete when every client trains and aggregates peer models, a small end-to-end experiment is reproducible, and accuracy/loss can be plotted alongside collaboration metrics and controller events.
 
 ### M4 — Implement MPI distributed simulation
+
+**Partial progress:** the transport-only `mpi-demo` exchanges and averages known models across real MPI ranks, without training. See [MPI transport instructions](docs/MPI_TRANSPORT.md). Full M4 completion still requires training/reference parity and the remaining tasks below.
 
 Tasks:
 - Add the required MPI execution backend using `mpi4py`, with dependencies in an optional install extra so the single-process reference remains lightweight. Document a supported MPI runtime and launcher. Require the rank count to equal the configured client count; use stable rank-to-client mapping.

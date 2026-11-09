@@ -27,13 +27,13 @@ PeerShift introduces two additional components:
 
 The final implementation will evaluate these components within a decentralized training environment.
 
-**Required future execution model: MPI.** The distributed simulator must use `mpi4py`, with one MPI process (rank) per client and actual model-parameter messages between peers. Each rank owns its model, optimizer, data partition, and selection history, and performs receiver-side aggregation locally. The existing single-process simulator remains the correctness reference. MPI is a future requirement; it is not implemented or installed by the current project.
+**Required future execution model: MPI.** The distributed simulator must use `mpi4py`, with one MPI process (rank) per client and actual model-parameter messages between peers. Each rank owns its model, optimizer, data partition, and selection history, and performs receiver-side aggregation locally. The existing single-process simulator remains the correctness reference. The fixed-peer MPI model-transport demo is implemented; integration with actual training and distributed similarity discovery remains future work.
 
 ## Technologies
 
 - Python — Core implementation
 - PyTorch — Implemented CPU learning framework
-- MPI / mpi4py — Required future multi-process distributed simulation
+- MPI / mpi4py — Implemented model-transport prototype; distributed training planned
 - SONAR — Optional integration, only if compatible with the required MPI execution model
 - Docker Compose — Optional later packaging for MPI clients
 - Linux NetEm — Planned network latency and bandwidth simulation
@@ -41,7 +41,7 @@ The final implementation will evaluate these components within a decentralized t
 
 ## Current Progress
 
-**Stage: Minimal IID Gossip Learning**
+**Stage: IID Gossip Learning and MPI Model Transport Prototype**
 
 Implemented:
 - Configurable deterministic selection simulation with rolling histories and JSONL logs
@@ -52,7 +52,7 @@ Implemented:
 
 These functions provide the foundation for future collapse detection and adaptive peer-selection experiments.
 
-Single-process MNIST gossip learning is implemented for IID Top-K/random experiments. Distributed execution and adaptive exploration remain future work.
+Single-process MNIST gossip learning is implemented for IID Top-K/random experiments. MPI ranks can exchange and average known models using fixed peer patterns; MPI training, similarity discovery, and adaptive exploration remain future work.
 
 ## Roadmap
 
@@ -65,7 +65,8 @@ See [PROJECT_PLAN.md](PROJECT_PLAN.md) for execution milestones, completion gate
 - [x] Build a reproducible multi-client simulation
 - [ ] Implement validation-plateau detection
 - [ ] Implement adaptive exploration and recovery logic
-- [ ] Implement MPI execution with one process per client and real peer model messages
+- [x] Implement MPI model-transport demo with one process per client and real peer messages
+- [ ] Integrate training and peer-selection policies with MPI
 - [ ] Evaluate optional framework integration compatible with MPI
 - [ ] Run multi-client training experiments
 - [ ] Simulate heterogeneous network conditions
@@ -119,3 +120,7 @@ Use train_random.toml for the paired random baseline. Default settings: 10 clien
 Training now writes aggregation.jsonl and summary.txt. Each client is evaluated on the same local validation examples immediately before and after averaging. Benefit is before-loss minus after-loss: positive indicates immediate improvement, negative worsening. Logs include selected-peer L2 distance and collaboration history metrics from preceding rounds. These diagnostics do not influence selection or establish harmful collapse. Summary counts use 1e-8 tolerance for unchanged results; additional validation time is recorded separately. Estimated model bytes and exchange counts retain their previous meaning.
 
 After the documented training command, inspect `cat <output-directory>/summary.txt` and `head -n 3 <output-directory>/aggregation.jsonl`. Non-IID learning, fixed-exploration learning comparisons, adaptive control and networking remain future work.
+
+## MPI model transport demo
+
+The first MPI increment runs separate client processes exchanging frozen MLP parameters and averaging locally, without training or MNIST. See [MPI_TRANSPORT.md](docs/MPI_TRANSPORT.md) for install/run commands, fixture patterns, communication accounting, protocol limits and tests. This is a partial M4 implementation; distributed training and Top-K discovery remain pending.
