@@ -1,0 +1,2 @@
+policy = "fixed_exploration"
+exploration_probability = 0.1

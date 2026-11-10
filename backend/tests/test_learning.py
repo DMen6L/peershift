@@ -48,7 +48,7 @@ def test_training_changes_parameters_and_learns():
     assert scores[0] == [0., -1., -4.]
 
 
-@pytest.mark.parametrize('policy',['top_k','random'])
+@pytest.mark.parametrize('policy',['top_k','random','fixed_exploration'])
 def test_training_outputs(tmp_path,policy):
     config = TrainingConfig(num_clients=3,k=1,rounds=2,local_steps=1,batch_size=2,
                             train_per_client=4,validation_per_client=2,test_samples=5,hidden_size=4,policy=policy)
@@ -73,7 +73,25 @@ def test_training_outputs(tmp_path,policy):
         run_training(config,tmp_path/'a',datasets=(data,test_data))
 
 
-@pytest.mark.parametrize('values',[{'num_clients':1},{'k':10},{'learning_rate':float('nan')}, {'own_weight':True},{'rounds':0},{'policy':'fixed_exploration'},{'partition':'non_iid'},{'device':'cuda'}])
+def test_fixed_exploration_training_matches_its_probability(tmp_path):
+    common = dict(num_clients=3,k=1,rounds=2,local_steps=1,batch_size=2,train_per_client=4,
+                  validation_per_client=2,test_samples=5,hidden_size=4)
+    data = fixture_data(), fixture_data(456)
+    run_training(TrainingConfig(policy='top_k',**common), tmp_path/'top', datasets=data)
+    run_training(TrainingConfig(policy='fixed_exploration',exploration_probability=0,**common), tmp_path/'zero', datasets=data)
+    run_training(TrainingConfig(policy='fixed_exploration',exploration_probability=1,**common), tmp_path/'always', datasets=data)
+
+    def peers(name):
+        rows = [json.loads(line) for line in (tmp_path/name/'selections.jsonl').read_text().splitlines()]
+        return rows
+
+    assert [row['selected_peer'] for row in peers('top')] == [row['selected_peer'] for row in peers('zero')]
+    assert all(row['selection_branch']=='top_k' and row['fallback_reason'] is None for row in peers('zero'))
+    explored = peers('always')
+    assert explored and all(row['selection_branch']=='exploration' and row['client']!=row['selected_peer'] for row in explored)
+
+
+@pytest.mark.parametrize('values',[{'num_clients':1},{'k':10},{'learning_rate':float('nan')}, {'own_weight':True},{'rounds':0},{'exploration_probability':True},{'exploration_probability':-0.1},{'exploration_probability':1.1},{'partition':'non_iid'},{'device':'cuda'}])
 def test_invalid_training_config(values):
     with pytest.raises(ValueError):
         TrainingConfig(**values)
