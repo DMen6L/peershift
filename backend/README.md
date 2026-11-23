@@ -18,17 +18,17 @@ The `peershift.selection` module retains Top-K and history-based exploration pri
 
 See [the execution plan](../PROJECT_PLAN.md) for subsequent baseline, learning, adaptive-control, and distributed milestones.
 
-The distributed milestone requires MPI via `mpi4py`: one process per client, real peer model messages, and local receiver-side averaging. Current commands remain single-process; MPI launch support and optional dependencies will be added later. The existing simulator will serve as the parity reference for that implementation.
+The distributed milestone requires MPI via `mpi4py`: one process per client, real peer model messages, and local receiver-side averaging. The `mpi` extra and `mpi-demo` command now provide a fixed-peer model exchange prototype; learning commands remain single-process. The existing simulator will serve as the parity reference for that implementation.
 
 ### Selection baseline configurations
 
 Use `backend/configs/top_k.toml`, `backend/configs/random.toml`, or `backend/configs/fixed_exploration.toml` with the existing simulate command, each into a separate empty output directory. All three use matching seeds and selection budgets.
 
-`policy` defaults to `top_k`; `exploration_probability` defaults to 0.1 and applies only to `fixed_exploration`. Random selection samples any eligible peer. Fixed exploration samples outside Top-K with that probability, otherwise inside Top-K. If no outside candidates exist it falls back to Top-K. Logs include `policy`, `selection_branch`, and nullable `fallback_reason`. Diversity differences do not establish learning benefits; training and adaptive control remain future work.
+`policy` defaults to `top_k`; `exploration_probability` defaults to 0.1 and applies only to `fixed_exploration`. Random selection samples any eligible peer. Fixed exploration samples outside Top-K with that probability, otherwise inside Top-K. If no outside candidates exist it falls back to Top-K. Logs include `policy`, `selection_branch`, and nullable `fallback_reason`. Diversity differences do not establish learning benefits; IID training supports all three policies, while adaptive control remains future work.
 
 ## Minimal IID gossip learning
 
-Implemented CPU MNIST MLP training with Top-K, random, and fixed-exploration selection, separate local validation and held-out test data, and receiver-side averaging from immutable post-training snapshots. Existing selection simulation remains available without ML dependencies. Non-IID, adaptive control, and networking remain future work.
+Implemented CPU MNIST MLP training with Top-K, random, and fixed-exploration selection, separate local validation and held-out test data, and receiver-side averaging from immutable post-training snapshots. Existing selection simulation remains available without ML dependencies. Non-IID learning, adaptive control, MPI training integration, and network experiments remain future work.
 
 ```sh
 uv sync --project backend --extra learning --locked
@@ -41,7 +41,7 @@ Use train_random.toml or train_fixed_exploration.toml for the paired baselines. 
 
 Training now writes aggregation.jsonl and summary.txt. Each client is evaluated on the same local validation examples immediately before and after averaging. Benefit is before-loss minus after-loss: positive indicates immediate improvement, negative worsening. Logs include selected-peer L2 distance and collaboration history metrics from preceding rounds. These diagnostics do not influence selection or establish harmful collapse. Summary counts use 1e-8 tolerance for unchanged results; additional validation time is recorded separately. Estimated model bytes and exchange counts retain their previous meaning.
 
-After the documented training command, inspect `cat <output-directory>/summary.txt` and `head -n 3 <output-directory>/aggregation.jsonl`. Non-IID learning, adaptive control, and networking remain future work.
+After the documented training command, inspect `cat <output-directory>/summary.txt` and `head -n 3 <output-directory>/aggregation.jsonl`. Non-IID learning, adaptive control, MPI training integration, and network experiments remain future work.
 
 ## Test verification modes
 
@@ -53,3 +53,7 @@ uv run --project backend --extra learning pytest backend/tests --require-learnin
 ```
 
 This command fails with an installation hint if torch or torchvision cannot import. A green learning verification must have no skipped learning modules. The suite checks actual model tensors against a small evaluation-free gossip reference, audits training/validation/test sample access using distinct offline datasets, and verifies benefit signs, tolerance boundaries and history eviction. These checks need no Git history or MNIST download. They establish mechanics, not research conclusions about exploration.
+
+## MPI model transport
+
+See [MPI transport instructions](../docs/MPI_TRANSPORT.md) for the separate-process exchange/averaging demo and mandatory MPI verification command. Ring, many-to-one and rotating fixture choices are supported. The demo does not train models or implement distributed similarity discovery.

@@ -73,7 +73,29 @@ def test_training_outputs(tmp_path,policy):
         run_training(config,tmp_path/'a',datasets=(data,test_data))
 
 
-def test_fixed_exploration_training_matches_its_probability(tmp_path):
+def test_fixed_exploration_training_matches_its_probability(tmp_path, monkeypatch):
+    import peershift.training as training
+    clients = []
+    original_client = training.LearningClient
+    original_select = training.select_peer
+    explored_choices = []
+
+    def capture_client(*args, **kwargs):
+        client = original_client(*args, **kwargs)
+        clients.append(client)
+        return client
+
+    def audit_selection(client_id, scores, k, **kwargs):
+        decision = original_select(client_id, scores, k, **kwargs)
+        if kwargs['policy'] == 'fixed_exploration' and kwargs['exploration_probability'] == 1:
+            ranked = sorted((i for i in range(len(scores)) if i != client_id),
+                            key=lambda i: (-scores[i], i))
+            assert decision.selected_peer in ranked[k:]
+            explored_choices.append(decision.selected_peer)
+        return decision
+
+    monkeypatch.setattr(training, 'LearningClient', capture_client)
+    monkeypatch.setattr(training, 'select_peer', audit_selection)
     common = dict(num_clients=3,k=1,rounds=2,local_steps=1,batch_size=2,train_per_client=4,
                   validation_per_client=2,test_samples=5,hidden_size=4)
     data = fixture_data(), fixture_data(456)
@@ -86,9 +108,31 @@ def test_fixed_exploration_training_matches_its_probability(tmp_path):
         return rows
 
     assert [row['selected_peer'] for row in peers('top')] == [row['selected_peer'] for row in peers('zero')]
+    for top_client, zero_client in zip(clients[:3], clients[3:6]):
+        for key, tensor in top_client.model.state_dict().items():
+            assert torch.equal(tensor, zero_client.model.state_dict()[key]), key
     assert all(row['selection_branch']=='top_k' and row['fallback_reason'] is None for row in peers('zero'))
     explored = peers('always')
     assert explored and all(row['selection_branch']=='exploration' and row['client']!=row['selected_peer'] for row in explored)
+    assert len(explored_choices) == common['num_clients']*common['rounds']
+
+
+def test_fixed_exploration_training_falls_back_when_top_k_contains_all_peers(tmp_path):
+    config = TrainingConfig(num_clients=3, k=2, rounds=2, local_steps=1, batch_size=2,
+                            train_per_client=4, validation_per_client=2, test_samples=5,
+                            hidden_size=4, policy='fixed_exploration', exploration_probability=1)
+    run_training(config, tmp_path, datasets=(fixture_data(), fixture_data(456)))
+    rows = [json.loads(line) for line in (tmp_path/'selections.jsonl').read_text().splitlines()]
+    assert len(rows) == 6
+    assert all(row['selection_branch'] == 'top_k'
+               and row['fallback_reason'] == 'no_outside_candidates'
+               and row['selected_peer'] != row['client'] for row in rows)
+
+
+@pytest.mark.parametrize('probability', [float('nan'), float('inf'), -float('inf')])
+def test_training_rejects_nonfinite_exploration_probability(probability):
+    with pytest.raises(ValueError, match='Exploration probability'):
+        TrainingConfig(policy='fixed_exploration', exploration_probability=probability)
 
 
 @pytest.mark.parametrize('values',[{'num_clients':1},{'k':10},{'learning_rate':float('nan')}, {'own_weight':True},{'rounds':0},{'exploration_probability':True},{'exploration_probability':-0.1},{'exploration_probability':1.1},{'partition':'non_iid'},{'device':'cuda'}])
@@ -97,11 +141,13 @@ def test_invalid_training_config(values):
         TrainingConfig(**values)
 
 
-def test_separate_process_cli_fixture(tmp_path):
+@pytest.mark.parametrize('policy', ['top_k', 'random', 'fixed_exploration'])
+def test_separate_process_cli_fixture(tmp_path, policy):
     import subprocess
     import sys
     config = tmp_path/'fixture.toml'
-    config.write_text('num_clients=2\nk=1\nrounds=1\nlocal_steps=1\nbatch_size=2\ntrain_per_client=4\nvalidation_per_client=2\ntest_samples=4\nhidden_size=4\n')
+    config.write_text('num_clients=3\nk=1\nrounds=1\nlocal_steps=1\nbatch_size=2\ntrain_per_client=4\nvalidation_per_client=2\ntest_samples=4\nhidden_size=4\n'
+                      f'policy="{policy}"\nexploration_probability=1.0\n')
     script = '''
 import sys, torch
 from torch.utils.data import TensorDataset
@@ -119,6 +165,11 @@ main()
         subprocess.run([sys.executable,'-c',script,str(config),str(tmp_path/name)],check=True,capture_output=True)
     for artifact in ('selections.jsonl','evaluations.jsonl','partitions.json','aggregation.jsonl'):
         assert (tmp_path/'one'/artifact).read_bytes()==(tmp_path/'two'/artifact).read_bytes()
+    assert TrainingConfig.load(tmp_path/'one/config.toml').policy == policy
+    rows = [json.loads(line) for line in (tmp_path/'one/selections.jsonl').read_text().splitlines()]
+    assert len(rows) == 3 and all(row['policy'] == policy for row in rows)
+    if policy == 'fixed_exploration':
+        assert all(row['selection_branch'] == 'exploration' for row in rows)
 
 
 def test_training_validation_and_test_access_stay_separate(tmp_path, monkeypatch):

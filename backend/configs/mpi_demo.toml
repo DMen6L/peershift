@@ -1,0 +1,5 @@
+num_clients = 3
+rounds = 3
+hidden_size = 8
+pattern = "ring"
+own_weight = 0.5
