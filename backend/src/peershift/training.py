@@ -32,6 +32,7 @@ class TrainingConfig:
     test_samples: int = 1000
     hidden_size: int = 128
     policy: str = 'top_k'
+    exploration_probability: float = 0.1
     dataset: str = 'mnist'
     model: str = 'mlp'
     partition: str = 'iid'
@@ -51,7 +52,10 @@ class TrainingConfig:
                 raise ValueError(f'Invalid {key}')
         if self.learning_rate <= 0 or not 0 <= self.own_weight <= 1:
             raise ValueError('Invalid learning rate or averaging weight')
-        if self.policy not in ('top_k','random') or (self.dataset,self.model,self.partition,self.device) != ('mnist','mlp','iid','cpu'):
+        probability = self.exploration_probability
+        if type(probability) not in (int, float) or not math.isfinite(probability) or not 0 <= probability <= 1:
+            raise ValueError('Exploration probability must be between zero and one')
+        if self.policy not in ('top_k','random','fixed_exploration') or (self.dataset,self.model,self.partition,self.device) != ('mnist','mlp','iid','cpu'):
             raise ValueError('Unsupported training configuration')
 
     @classmethod
@@ -115,6 +119,7 @@ def run_training(config, output, datasets=None, download=False):
         clients.append(LearningClient(model,torch.optim.SGD(model.parameters(),lr=config.learning_rate),cycle(loader),DataLoader(Subset(train,validation),batch_size=config.batch_size),deque(maxlen=config.history_window)))
     test_loader=DataLoader(Subset(test,test_indices[:config.test_samples]),batch_size=config.batch_size)
     streams=[random.Random(f'{config.seed}:client:{i}') for i in range(config.num_clients)]
+    exploration_streams=[random.Random(f'{config.seed}:exploration:{i}') for i in range(config.num_clients)]
     output.mkdir(parents=True,exist_ok=True)
     (output/'config.toml').write_text(''.join(f'{k} = {json.dumps(v)}\n' for k,v in asdict(config).items()))
     (output/'partitions.json').write_text(json.dumps(dict(clients=partitions,test=test_indices[:config.test_samples])))
@@ -143,7 +148,7 @@ def run_training(config, output, datasets=None, download=False):
                         entropy_before_selection=peer_entropy(c.history,config.num_clients-1),
                         repetition_rate_before_selection=repetition_rate(c.history),
                         unique_peers_before_selection=len(set(c.history))) for c in clients]
-            decisions=[select_peer(i,scores[i],config.k,policy=config.policy,rng=streams[i]) for i in range(config.num_clients)]
+            decisions=[select_peer(i,scores[i],config.k,policy=config.policy,rng=streams[i],exploration_probability=config.exploration_probability,exploration_rng=exploration_streams[i]) for i in range(config.num_clients)]
             for i,(c,d) in enumerate(zip(clients,decisions)):
                 aggregate(c.model,states[i],states[d.selected_peer],config.own_weight)
                 c.history.append(d.selected_peer)

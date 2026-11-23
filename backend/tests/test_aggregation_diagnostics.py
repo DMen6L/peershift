@@ -121,7 +121,7 @@ def test_own_weight_and_rolling_prior_history(tmp_path, monkeypatch):
     assert summary['additional_validation_seconds'] >= 0
 
 
-@pytest.mark.parametrize('policy', ['top_k', 'random'])
+@pytest.mark.parametrize('policy', ['top_k', 'random', 'fixed_exploration'])
 def test_final_tensors_match_reference_gossip_without_evaluations(tmp_path, monkeypatch, policy):
     """Reference the mathematical round contract, never the current Git commit."""
     cfg = config(policy=policy, local_steps=2, rounds=3)
@@ -151,6 +151,7 @@ def test_final_tensors_match_reference_gossip_without_evaluations(tmp_path, monk
                for part in partitions]
     optimizers = [torch.optim.SGD(model.parameters(), lr=cfg.learning_rate) for model in reference_models]
     streams = [random.Random(f'{cfg.seed}:client:{i}') for i in range(cfg.num_clients)]
+    exploration_streams = [random.Random(f'{cfg.seed}:exploration:{i}') for i in range(cfg.num_clients)]
     expected_peers = []
     for _ in range(cfg.rounds):
         for model, optimizer, batch_stream in zip(reference_models, optimizers, batches):
@@ -164,7 +165,9 @@ def test_final_tensors_match_reference_gossip_without_evaluations(tmp_path, monk
                   for model in reference_models]
         vectors = [torch.cat([v.flatten() for v in state.values()]) for state in states]
         peers = [select_peer(i, [-torch.linalg.vector_norm(vectors[i]-v).item() for v in vectors],
-                             cfg.k, policy=policy, rng=streams[i]).selected_peer
+                             cfg.k, policy=policy, rng=streams[i],
+                             exploration_probability=cfg.exploration_probability,
+                             exploration_rng=exploration_streams[i]).selected_peer
                  for i in range(cfg.num_clients)]
         expected_peers.extend(peers)
         for i, model in enumerate(reference_models):
