@@ -1,0 +1,6 @@
+# SONAR-style closest collaborators and uniform self-plus-peers averaging.
+# num_collaborators is the actual peer count. Legacy k is not used by closest.
+policy = "closest"
+num_collaborators = 2
+similarity_metric = "sum_tensor_l2"
+aggregation_rule = "uniform_self_and_peers"
