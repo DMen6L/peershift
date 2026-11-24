@@ -58,6 +58,8 @@ Single-process MNIST gossip learning is implemented for IID Top-K, random, and f
 
 See [PROJECT_PLAN.md](PROJECT_PLAN.md) for execution milestones, completion gates, experiment rules, and a proposed schedule.
 
+See [the SONAR reimplementation guide](docs/SONAR_REIMPLEMENTATION_GUIDE.md) for the core architecture, verified upstream semantics, and implementation contracts for rebuilding those ideas independently in PeerShift.
+
 - [x] Define research questions and experimental methodology
 - [x] Initialize project repository
 - [x] Implement initial peer-selection functions
@@ -106,14 +108,14 @@ Use `backend/configs/top_k.toml`, `backend/configs/random.toml`, or `backend/con
 
 ## Minimal IID gossip learning
 
-Implemented CPU MNIST MLP training with Top-K, random, and fixed-exploration selection, separate local validation and held-out test data, and receiver-side averaging from immutable post-training snapshots. Existing selection simulation remains available without ML dependencies. Non-IID learning, adaptive control, MPI training integration, and network experiments remain future work.
+Implemented CPU MNIST MLP training with Top-K, random, fixed-exploration, and SONAR-style closest-peer selection, separate local validation and held-out test data, and receiver-side averaging from immutable post-training snapshots. Existing selection simulation remains available without ML dependencies. Non-IID learning, adaptive control, MPI training integration, and network experiments remain future work.
 
 ```sh
 uv sync --project backend --extra learning --locked
 uv run --project backend --extra learning peershift train --config backend/configs/train_top_k.toml --output /tmp/peershift-learning --download
 ```
 
-Use train_random.toml or train_fixed_exploration.toml for the paired baselines. Default settings: 10 clients, 10 rounds, 10 local steps, batch size 32, learning rate .05, own weight .5, hidden size 128, 500 training and 100 validation examples per client, 1000 test examples. All settings are configurable; only mnist/mlp/iid/cpu and top_k/random/fixed_exploration are supported for training. `exploration_probability` defaults to 0.1 and applies only to fixed exploration. Data lives in backend/data by default. Omit --download once cached. Outputs include resolved configuration, exact partitions, environment/initial-model fingerprint, selection and evaluation JSONL, and summary counts/runtime. Round -1 denotes initial evaluation. Estimated parameter payload excludes similarity discovery and transport overhead; no network traffic occurs. Similarity uses full snapshot access as a simulation assumption. Same-environment reproducibility excludes runtime.
+Use train_random.toml or train_fixed_exploration.toml for the paired baselines. Default settings: 10 clients, 10 rounds, 10 local steps, batch size 32, learning rate .05, own weight .5, hidden size 128, 500 training and 100 validation examples per client, 1000 test examples. All settings are configurable; Training supports mnist/mlp/iid/cpu with top_k, random, fixed_exploration, and closest policies. The closest policy also supports multiple collaborators; see backend/configs/train_sonar_closest.toml. `exploration_probability` defaults to 0.1 and applies only to fixed exploration. Data lives in backend/data by default. Omit --download once cached. Outputs include resolved configuration, exact partitions, environment/initial-model fingerprint, selection and evaluation JSONL, and summary counts/runtime. Round -1 denotes initial evaluation. Estimated parameter payload excludes similarity discovery and transport overhead; no network traffic occurs. Similarity uses full snapshot access as a simulation assumption. Same-environment reproducibility excludes runtime.
 
 ## Immediate exchange measurements
 
@@ -124,3 +126,7 @@ After the documented training command, inspect `cat <output-directory>/summary.t
 ## MPI model transport demo
 
 The first MPI increment runs separate client processes exchanging frozen MLP parameters and averaging locally, without training or MNIST. See [MPI_TRANSPORT.md](docs/MPI_TRANSPORT.md) for install/run commands, fixture patterns, communication accounting, protocol limits and tests. This is a partial M4 implementation; distributed training and Top-K discovery remain pending.
+
+## SONAR-style core baseline
+
+The independent SONAR migration now includes `closest` selection of multiple actual collaborators, summed tensor-L2 distance, and equal self-plus-peers model averaging. Run the training command with `backend/configs/train_sonar_closest.toml`; see [backend instructions](backend/README.md#sonar-style-closest-collaborators) for settings and multi-peer diagnostics. Existing Top-K pool sampling, random and fixed exploration remain available with their original defaults. This serial baseline does not yet connect training to MPI or reproduce SONAR's heterogeneous experiments.

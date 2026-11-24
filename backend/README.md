@@ -28,14 +28,14 @@ Use `backend/configs/top_k.toml`, `backend/configs/random.toml`, or `backend/con
 
 ## Minimal IID gossip learning
 
-Implemented CPU MNIST MLP training with Top-K, random, and fixed-exploration selection, separate local validation and held-out test data, and receiver-side averaging from immutable post-training snapshots. Existing selection simulation remains available without ML dependencies. Non-IID learning, adaptive control, MPI training integration, and network experiments remain future work.
+Implemented CPU MNIST MLP training with Top-K, random, fixed-exploration, and SONAR-style closest-peer selection, separate local validation and held-out test data, and receiver-side averaging from immutable post-training snapshots. Existing selection simulation remains available without ML dependencies. Non-IID learning, adaptive control, MPI training integration, and network experiments remain future work.
 
 ```sh
 uv sync --project backend --extra learning --locked
 uv run --project backend --extra learning peershift train --config backend/configs/train_top_k.toml --output /tmp/peershift-learning --download
 ```
 
-Use train_random.toml or train_fixed_exploration.toml for the paired baselines. Default settings: 10 clients, 10 rounds, 10 local steps, batch size 32, learning rate .05, own weight .5, hidden size 128, 500 training and 100 validation examples per client, 1000 test examples. All settings are configurable; only mnist/mlp/iid/cpu and top_k/random/fixed_exploration are supported for training. `exploration_probability` defaults to 0.1 and applies only to fixed exploration. Data lives in backend/data by default. Omit --download once cached. Outputs include resolved configuration, exact partitions, environment/initial-model fingerprint, selection and evaluation JSONL, and summary counts/runtime. Round -1 denotes initial evaluation. Estimated parameter payload excludes similarity discovery and transport overhead; no network traffic occurs. Similarity uses full snapshot access as a simulation assumption. Same-environment reproducibility excludes runtime.
+Use train_random.toml or train_fixed_exploration.toml for the paired baselines. Default settings: 10 clients, 10 rounds, 10 local steps, batch size 32, learning rate .05, own weight .5, hidden size 128, 500 training and 100 validation examples per client, 1000 test examples. All settings are configurable; Training supports mnist/mlp/iid/cpu with top_k, random, fixed_exploration, and closest policies. The closest policy also supports multiple collaborators; see backend/configs/train_sonar_closest.toml. `exploration_probability` defaults to 0.1 and applies only to fixed exploration. Data lives in backend/data by default. Omit --download once cached. Outputs include resolved configuration, exact partitions, environment/initial-model fingerprint, selection and evaluation JSONL, and summary counts/runtime. Round -1 denotes initial evaluation. Estimated parameter payload excludes similarity discovery and transport overhead; no network traffic occurs. Similarity uses full snapshot access as a simulation assumption. Same-environment reproducibility excludes runtime.
 
 ## Immediate exchange measurements
 
@@ -57,3 +57,23 @@ This command fails with an installation hint if torch or torchvision cannot impo
 ## MPI model transport
 
 See [MPI transport instructions](../docs/MPI_TRANSPORT.md) for the separate-process exchange/averaging demo and mandatory MPI verification command. Ring, many-to-one and rotating fixture choices are supported. The demo does not train models or implement distributed similarity discovery.
+
+## SONAR-style closest collaborators
+
+The first independent SONAR-style baseline is available in the **training** command:
+
+```sh
+uv run --project backend --extra learning peershift train --config backend/configs/train_sonar_closest.toml --output /tmp/peershift-sonar-closest --download
+```
+
+Use a fresh output directory. The profile sets `policy="closest"`, `num_collaborators=2`, `similarity_metric="sum_tensor_l2"`, and `aggregation_rule="uniform_self_and_peers"`. Each receiver selects both nearest peers, then averages self plus both peers at weight 1/3 each. This independently implements the inspected SONAR dynamic-selection and uniform-aggregation formulas; it is not a SONAR runtime dependency or a reproduction of published results.
+
+`num_collaborators` is the actual number of peers. Existing `k` retains its candidate-pool meaning for legacy `top_k`/`fixed_exploration` policies and is unused by `closest`. Existing policies still select one peer and reject a different collaborator count. The default metric `flat_l2` and rule `fixed_self` preserve existing behavior. `sum_tensor_l2` sums per-tensor Euclidean norms and ignores `num_batches_tracked`; it can rank peers differently from flattened L2. Both metrics return larger-is-closer scores. Equal scores for `closest` break by client ID.
+
+`uniform_self_and_peers` assigns 1/(m+1) to each of self and m peers. `fixed_self` instead assigns `own_weight` to self and divides the remaining weight among peers; `own_weight` only controls this rule. Actual weights are logged for closest-policy runs. Serial multi-peer averaging supports matching floating tensor schemas; nonfloating/incompatible state is rejected. MPI transport remains restricted to its existing float32 one-peer protocol.
+
+Closest-policy JSONL uses `selected_peers` and aligned `selected_peer_distances`, not a fabricated scalar peer. Diagnostics label benefit as `joint_aggregation`: it measures the entire merge, not a contribution attributable to each peer. Histories retain peer sets by round. `peer_selection_entropy` counts individual peer selections in those sets; `adjacent_peer_set_repetition_rate` compares canonical sets; `unique_collaborators` and `history_rounds` describe the same window. Prior metrics have a `_before_selection` suffix. A repeated multi-peer set can have nonzero entropy without any exploration; thresholds must account for peer count and history window. Legacy scalar-peer records keep their existing meanings.
+
+Summary counts separate `aggregation_events` (clients × rounds), `logical_model_exchanges` (events × collaborators), and local training steps (events × local_steps). Benefit percentages use events. The two-collaborator example is not an equal-exchange-budget comparison with legacy one-peer runs; use `num_collaborators=1` for a matched peer count, or report the different budgets explicitly. Payload bytes remain estimates; all candidate models are available in memory and no distributed discovery or training is performed by this runner. The artificial-score `simulate` command retains its three existing policies.
+
+See [the reimplementation guide](../docs/SONAR_REIMPLEMENTATION_GUIDE.md) for upstream references, intended architecture and remaining migration work.

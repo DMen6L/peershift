@@ -11,9 +11,10 @@ import platform
 from importlib.metadata import version
 import torch
 from torch.utils.data import DataLoader, Subset
-from .learning import make_model, snapshot, aggregate, similarities, local_train, evaluate
-from .selection import select_peer
-from .detector import peer_entropy, repetition_rate
+from .learning import (make_model, snapshot, aggregate, aggregate_peers, aggregation_weights,
+                       similarities, local_train, evaluate)
+from .selection import select_peer, closest_select
+from .detector import peer_entropy, repetition_rate, collaboration_metrics
 
 
 @dataclass(frozen=True)
@@ -33,6 +34,9 @@ class TrainingConfig:
     hidden_size: int = 128
     policy: str = 'top_k'
     exploration_probability: float = 0.1
+    num_collaborators: int = 1
+    similarity_metric: str = 'flat_l2'
+    aggregation_rule: str = 'fixed_self'
     dataset: str = 'mnist'
     model: str = 'mlp'
     partition: str = 'iid'
@@ -43,8 +47,17 @@ class TrainingConfig:
         for key in ('num_clients','rounds','local_steps','batch_size','k','history_window','train_per_client','validation_per_client','test_samples','hidden_size'):
             if type(getattr(self,key)) is not int or getattr(self,key) < 1:
                 raise ValueError(f'{key} must be a positive integer')
-        if type(self.seed) is not int or self.num_clients < 2 or self.k >= self.num_clients:
+        if (type(self.seed) is not int or self.num_clients < 2
+                or (self.policy != 'closest' and self.k >= self.num_clients)):
             raise ValueError('Invalid seed, client count or K')
+        if type(self.num_collaborators) is not int or not 1 <= self.num_collaborators < self.num_clients:
+            raise ValueError('Invalid collaborator count')
+        if self.policy != 'closest' and self.num_collaborators != 1:
+            raise ValueError('Legacy policies select one peer; use closest for multiple collaborators')
+        if self.similarity_metric not in ('flat_l2', 'sum_tensor_l2'):
+            raise ValueError('Unknown similarity metric')
+        if self.aggregation_rule not in ('fixed_self', 'uniform_self_and_peers'):
+            raise ValueError('Unknown aggregation rule')
         import math
         for key in ('learning_rate','own_weight'):
             value = getattr(self,key)
@@ -55,7 +68,7 @@ class TrainingConfig:
         probability = self.exploration_probability
         if type(probability) not in (int, float) or not math.isfinite(probability) or not 0 <= probability <= 1:
             raise ValueError('Exploration probability must be between zero and one')
-        if self.policy not in ('top_k','random','fixed_exploration') or (self.dataset,self.model,self.partition,self.device) != ('mnist','mlp','iid','cpu'):
+        if self.policy not in ('top_k','random','fixed_exploration','closest') or (self.dataset,self.model,self.partition,self.device) != ('mnist','mlp','iid','cpu'):
             raise ValueError('Unsupported training configuration')
 
     @classmethod
@@ -124,7 +137,10 @@ def run_training(config, output, datasets=None, download=False):
     (output/'config.toml').write_text(''.join(f'{k} = {json.dumps(v)}\n' for k,v in asdict(config).items()))
     (output/'partitions.json').write_text(json.dumps(dict(clients=partitions,test=test_indices[:config.test_samples])))
     fingerprint=hashlib.sha256(b''.join(v.numpy().tobytes() for v in initial.values())).hexdigest()
-    (output/'manifest.json').write_text(json.dumps(dict(python=platform.python_version(),torch=torch.__version__,torchvision=version("torchvision"),initial_model=fingerprint)))
+    (output/'manifest.json').write_text(json.dumps(dict(python=platform.python_version(),torch=torch.__version__,torchvision=version("torchvision"),initial_model=fingerprint,
+        similarity_metric=config.similarity_metric, aggregation_rule=config.aggregation_rule,
+        num_collaborators=config.num_collaborators,
+        candidate_discovery='all post-training snapshots in memory; no network discovery')))
     benefits=[]
     additional_validation_seconds=0.0
     started=time.perf_counter()
@@ -140,41 +156,80 @@ def run_training(config, output, datasets=None, download=False):
         for round_index in range(config.rounds):
             for c in clients:
                 local_train(c.model,c.optimizer,c.batches,config.local_steps)
-            states=[snapshot(c.model) for c in clients]; scores=similarities(states)
+            states=[snapshot(c.model) for c in clients]
+            scores=similarities(states, metric=config.similarity_metric)
             evaluation_started=time.perf_counter()
             before=[evaluate(c.model,c.validation)[0] for c in clients]
             additional_validation_seconds += time.perf_counter()-evaluation_started
-            prior=[dict(history_length_before_selection=len(c.history),
-                        entropy_before_selection=peer_entropy(c.history,config.num_clients-1),
-                        repetition_rate_before_selection=repetition_rate(c.history),
-                        unique_peers_before_selection=len(set(c.history))) for c in clients]
-            decisions=[select_peer(i,scores[i],config.k,policy=config.policy,rng=streams[i],exploration_probability=config.exploration_probability,exploration_rng=exploration_streams[i]) for i in range(config.num_clients)]
-            for i,(c,d) in enumerate(zip(clients,decisions)):
-                aggregate(c.model,states[i],states[d.selected_peer],config.own_weight)
-                c.history.append(d.selected_peer)
-                selections.write(json.dumps(dict(round=round_index,client=i,policy=config.policy,selected_peer=d.selected_peer,selection_branch=d.selection_branch,fallback_reason=d.fallback_reason,entropy=peer_entropy(c.history,config.num_clients-1),repetition_rate=repetition_rate(c.history),unique_peers=len(set(c.history))))+'\n')
+            grouped = config.policy == 'closest'
+            if grouped:
+                prior=[{f'{key}_before_selection': value for key, value in
+                        collaboration_metrics(c.history,config.num_clients-1).items()} for c in clients]
+                choices=[(closest_select(i,scores[i],config.num_collaborators),'closest',None)
+                         for i in range(config.num_clients)]
+            else:
+                prior=[dict(history_length_before_selection=len(c.history),
+                            entropy_before_selection=peer_entropy(c.history,config.num_clients-1),
+                            repetition_rate_before_selection=repetition_rate(c.history),
+                            unique_peers_before_selection=len(set(c.history))) for c in clients]
+                decisions=[select_peer(i,scores[i],config.k,policy=config.policy,rng=streams[i],exploration_probability=config.exploration_probability,exploration_rng=exploration_streams[i]) for i in range(config.num_clients)]
+                choices=[((d.selected_peer,),d.selection_branch,d.fallback_reason) for d in decisions]
+            for i,(c,(peers,branch,fallback)) in enumerate(zip(clients,choices)):
+                if config.aggregation_rule == 'fixed_self' and len(peers) == 1:
+                    aggregate(c.model,states[i],states[peers[0]],config.own_weight)
+                else:
+                    aggregate_peers(c.model,states[i],[states[peer] for peer in peers],
+                                    rule=config.aggregation_rule,own_weight=config.own_weight)
+                if grouped:
+                    c.history.append(tuple(sorted(peers)))
+                    self_weight, peer_weights = aggregation_weights(len(peers),config.aggregation_rule,config.own_weight)
+                    details=dict(selected_peers=list(peers),selected_peer_distances=[-scores[i][peer] for peer in peers],
+                                 similarity_metric=config.similarity_metric,aggregation_rule=config.aggregation_rule,
+                                 self_weight=self_weight,selected_peer_weights=list(peer_weights),
+                                 **collaboration_metrics(c.history,config.num_clients-1))
+                else:
+                    c.history.append(peers[0])
+                    details=dict(selected_peer=peers[0],entropy=peer_entropy(c.history,config.num_clients-1),
+                                 repetition_rate=repetition_rate(c.history),unique_peers=len(set(c.history)))
+                selections.write(json.dumps(dict(round=round_index,client=i,policy=config.policy,
+                    selection_branch=branch,fallback_reason=fallback,**details))+'\n')
             after=record(round_index)
-            for i,d in enumerate(decisions):
+            for i,(peers,_,_) in enumerate(choices):
                 benefit=before[i]-after[i]
                 benefits.append(benefit)
-                diagnostics.write(json.dumps(dict(round=round_index,client=i,selected_peer=d.selected_peer,
+                if grouped:
+                    self_weight, peer_weights = aggregation_weights(len(peers),config.aggregation_rule,config.own_weight)
+                    peer_details=dict(selected_peers=list(peers),selected_peer_distances=[-scores[i][peer] for peer in peers],
+                                      similarity_metric=config.similarity_metric,aggregation_rule=config.aggregation_rule,
+                                      self_weight=self_weight,selected_peer_weights=list(peer_weights),
+                                      benefit_scope='joint_aggregation')
+                else:
+                    peer_details=dict(selected_peer=peers[0],selected_peer_distance=-scores[i][peers[0]])
+                diagnostics.write(json.dumps(dict(round=round_index,client=i,**peer_details,
                     policy=config.policy,validation_loss_before_aggregation=before[i],
                     validation_loss_after_aggregation=after[i],aggregation_benefit=benefit,
-                    selected_peer_distance=-scores[i][d.selected_peer],**prior[i]))+'\n')
-    exchanges=config.rounds*config.num_clients
+                    **prior[i]))+'\n')
+    aggregation_events=config.rounds*config.num_clients
+    exchanges=aggregation_events*config.num_collaborators
     benefit_summary = _benefit_summary(benefits)
     counts = {name: benefit_summary[name] for name in ('improved', 'worsened', 'unchanged')}
-    summary=dict(local_steps=exchanges*config.local_steps,logical_model_exchanges=exchanges,
+    summary=dict(local_steps=aggregation_events*config.local_steps,logical_model_exchanges=exchanges,
+                 aggregation_events=aggregation_events,collaborators_per_event=config.num_collaborators,
+                 similarity_metric=config.similarity_metric,aggregation_rule=config.aggregation_rule,
                  estimated_parameter_payload_bytes=exchanges*sum(v.numel()*v.element_size() for v in initial.values()),
                  runtime_seconds=time.perf_counter()-started,
                  additional_validation_seconds=additional_validation_seconds,
                  **benefit_summary)
     (output/'summary.json').write_text(json.dumps(summary))
     lines=[f'Policy: {config.policy}; clients: {config.num_clients}; rounds: {config.rounds}; exchanges: {exchanges}',
+           f'Aggregation events: {aggregation_events}; collaborators per event: {config.num_collaborators}',
+           f'Metric: {config.similarity_metric}; averaging rule: {config.aggregation_rule}',
            f'Mean immediate validation benefit: {summary["mean_aggregation_benefit"]:.8f}']
-    lines.extend(f'{name.capitalize()}: {count} ({100*count/exchanges:.1f}%)' for name,count in counts.items())
+    lines.extend(f'{name.capitalize()}: {count} ({100*count/aggregation_events:.1f}%)' for name,count in counts.items())
     lines.extend([f'Runtime: {summary["runtime_seconds"]:.4f} seconds',
                   f'Additional pre-aggregation validation time: {additional_validation_seconds:.4f} seconds',
                   'Benefit = validation loss before minus after averaging. Positive means immediate local improvement.',
+                  'For multiple collaborators, benefit describes the joint merge, not individual peer contributions.',
+                  'Payload bytes estimate selected model acquisition; discovery is in-memory and no network traffic is measured.',
                   'Unchanged uses absolute tolerance 1e-8. These observations do not establish collapse or long-term benefit.'])
     (output/'summary.txt').write_text('\n'.join(lines)+'\n')

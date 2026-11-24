@@ -21,3 +21,17 @@ def repetition_rate(history):
     repeated = sum(history[i] == history[i - 1] for i in range(1, len(history)))
 
     return repeated / (len(history) - 1)
+
+
+def collaboration_metrics(history, total_peers):
+    """Multi-peer histories contain one canonical peer set per round.
+
+    Entropy counts individual selections; repetition compares entire peer sets.
+    A repeated multi-peer set can have nonzero entropy without exploring.
+    """
+    rounds = [tuple(sorted(set(peers))) for peers in history]
+    selections = [peer for peers in rounds for peer in peers]
+    return dict(history_rounds=len(rounds),
+                peer_selection_entropy=peer_entropy(selections, total_peers),
+                adjacent_peer_set_repetition_rate=repetition_rate(rounds),
+                unique_collaborators=len(set(selections)))

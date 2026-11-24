@@ -12,6 +12,10 @@ Implemented: runnable `peershift` package and CLI, seeded selection-only simulat
 
 Implemented additionally: minimal IID MNIST training and snapshot aggregation for Top-K, random, and fixed exploration, plus fixed-peer MPI model transport and receiver-side averaging with real messages. Missing: non-IID learning, controlled multi-seed policy comparisons, validation-plateau detection, adaptive control, MPI training integration, distributed discovery, and network experiments. Selection-simulator counts and single-process training byte estimates are not network measurements; the MPI demo records actual application payload counts. K is the candidate pool size, not the number of peers selected.
 
+## SONAR core migration progress
+
+The first independent semantic baseline adds deterministic `closest` selection of `num_collaborators` actual peers, `sum_tensor_l2` scoring, and `uniform_self_and_peers` averaging. Existing policies and defaults remain separate baselines. Training logs represent selected peer groups and joint aggregation benefit; exchange counts scale with actual collaborator count. The example is `backend/configs/train_sonar_closest.toml`. This is a serial CPU learning increment; generalized MPI exchange, distributed discovery, non-IID data and adaptive control remain later work. See [the reimplementation guide](docs/SONAR_REIMPLEMENTATION_GUIDE.md).
+
 ## Goals and boundaries
 
 1. Detect persistent concentration together with validation stagnation using local client observations.
@@ -151,14 +155,14 @@ The output directory must be empty. Logs represent selections, not network trans
 
 ## Minimal IID gossip learning
 
-Implemented CPU MNIST MLP training with Top-K, random, and fixed-exploration selection, separate local validation and held-out test data, and receiver-side averaging from immutable post-training snapshots. Existing selection simulation remains available without ML dependencies. Non-IID learning, adaptive control, MPI training integration, and network experiments remain future work.
+Implemented CPU MNIST MLP training with Top-K, random, fixed-exploration, and SONAR-style closest-peer selection, separate local validation and held-out test data, and receiver-side averaging from immutable post-training snapshots. Existing selection simulation remains available without ML dependencies. Non-IID learning, adaptive control, MPI training integration, and network experiments remain future work.
 
 ```sh
 uv sync --project backend --extra learning --locked
 uv run --project backend --extra learning peershift train --config backend/configs/train_top_k.toml --output /tmp/peershift-learning --download
 ```
 
-Use train_random.toml or train_fixed_exploration.toml for the paired baselines. Default settings: 10 clients, 10 rounds, 10 local steps, batch size 32, learning rate .05, own weight .5, hidden size 128, 500 training and 100 validation examples per client, 1000 test examples. All settings are configurable; only mnist/mlp/iid/cpu and top_k/random/fixed_exploration are supported for training. `exploration_probability` defaults to 0.1 and applies only to fixed exploration. Data lives in backend/data by default. Omit --download once cached. Outputs include resolved configuration, exact partitions, environment/initial-model fingerprint, selection and evaluation JSONL, and summary counts/runtime. Round -1 denotes initial evaluation. Estimated parameter payload excludes similarity discovery and transport overhead; no network traffic occurs. Similarity uses full snapshot access as a simulation assumption. Same-environment reproducibility excludes runtime.
+Use train_random.toml or train_fixed_exploration.toml for the paired baselines. Default settings: 10 clients, 10 rounds, 10 local steps, batch size 32, learning rate .05, own weight .5, hidden size 128, 500 training and 100 validation examples per client, 1000 test examples. All settings are configurable; Training supports mnist/mlp/iid/cpu with top_k, random, fixed_exploration, and closest policies. The closest policy also supports multiple collaborators; see backend/configs/train_sonar_closest.toml. `exploration_probability` defaults to 0.1 and applies only to fixed exploration. Data lives in backend/data by default. Omit --download once cached. Outputs include resolved configuration, exact partitions, environment/initial-model fingerprint, selection and evaluation JSONL, and summary counts/runtime. Round -1 denotes initial evaluation. Estimated parameter payload excludes similarity discovery and transport overhead; no network traffic occurs. Similarity uses full snapshot access as a simulation assumption. Same-environment reproducibility excludes runtime.
 
 ## Immediate exchange measurements
 

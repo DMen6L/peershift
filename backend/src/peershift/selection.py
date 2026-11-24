@@ -47,6 +47,22 @@ def random_select(client_id, similarities, *, rng=None):
     return (rng or random).choice([i for i in range(len(similarities)) if i != client_id])
 
 
+def closest_select(client_id, similarities, num_collaborators=1) -> tuple[int, ...]:
+    """Choose all m closest peers from larger-is-better scores, ties by ID.
+
+    Unlike top_k_select, m is the number of actual collaborators, not a pool
+    from which to sample one collaborator.
+    """
+    if type(client_id) is not int or not 0 <= client_id < len(similarities):
+        raise ValueError('Invalid client ID')
+    if type(num_collaborators) is not int or not 1 <= num_collaborators < len(similarities):
+        raise ValueError('Invalid collaborator count')
+    if not all(isfinite(score) for score in similarities):
+        raise ValueError('Similarity scores must be finite')
+    eligible = [peer for peer in range(len(similarities)) if peer != client_id]
+    return tuple(sorted(eligible, key=lambda peer: (-similarities[peer], peer))[:num_collaborators])
+
+
 def select_peer(client_id, similarities, k=2, *, policy='top_k',
                 exploration_probability=0.1, rng=None, exploration_rng=None):
     if policy not in ('top_k', 'random', 'fixed_exploration'):
