@@ -153,7 +153,7 @@ Keep optimizer state local. With current momentum-free SGD there are no momentum
 
 ## 7. MPI communication and discovery
 
-Use MPI through `mpi4py`, one rank per client, with a private communicator for protocol messages. Our existing transport already demonstrates one selected peer per rank. Generalizing to several selected peers is a later change, not current functionality.
+Use MPI through `mpi4py`, one rank per client, with a private communicator for protocol messages. Our transport supports multiple requested peers per rank through `exchange_many`, with the one-peer `exchange` compatibility wrapper. The `mpi-collaborate` fixture implements dense full-snapshot discovery, local closest-peer selection and merging; training integration remains pending.
 
 For a synchronous multi-peer design:
 

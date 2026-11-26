@@ -1,0 +1,10 @@
+num_clients = 4
+rounds = 3
+num_collaborators = 2
+hidden_size = 8
+seed = 42
+history_window = 20
+policy = "closest"
+similarity_metric = "sum_tensor_l2"
+aggregation_rule = "uniform_self_and_peers"
+own_weight = 0.5
