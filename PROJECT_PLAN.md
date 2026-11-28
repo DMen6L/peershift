@@ -10,11 +10,11 @@ The final deliverable is a reproducible research prototype, experiment results, 
 
 Implemented: runnable `peershift` package and CLI, seeded selection-only simulation, Top-K/random/fixed-exploration policies, bounded histories, entropy/repetition/unique-peer metrics, resolved TOML configuration and JSONL logs. History-based exploration remains a separate primitive. Python 3.12 is the development baseline with a dependency lockfile.
 
-Implemented additionally: minimal IID MNIST training and snapshot aggregation for Top-K, random, and fixed exploration, plus fixed-peer MPI model transport and receiver-side averaging with real messages. Missing: non-IID learning, controlled multi-seed policy comparisons, validation-plateau detection, adaptive control, MPI training integration, and network experiments. Dense distributed discovery is available in the no-training collaboration fixture. Selection-simulator counts and single-process training byte estimates are not network measurements; the MPI demo records actual application payload counts. K is the candidate pool size, not the number of peers selected.
+Implemented additionally: minimal IID MNIST training and snapshot aggregation for Top-K, random, and fixed exploration, plus fixed-peer MPI model transport and receiver-side averaging with real messages. Missing: non-IID learning, controlled multi-seed policy comparisons, validation-plateau detection, adaptive control, other MPI policies, and network experiments. Dense distributed discovery is available in the no-training collaboration fixture. Selection-simulator counts and single-process training byte estimates are not network measurements; the MPI demo records actual application payload counts. K is the candidate pool size, not the number of peers selected.
 
 ## SONAR core migration progress
 
-The first independent semantic baseline adds deterministic `closest` selection of `num_collaborators` actual peers, `sum_tensor_l2` scoring, and `uniform_self_and_peers` averaging. Existing policies and defaults remain separate baselines. Training logs represent selected peer groups and joint aggregation benefit; exchange counts scale with actual collaborator count. The example is `backend/configs/train_sonar_closest.toml`. This is a serial CPU learning increment; MPI training integration, non-IID data and adaptive control remain later work. The `mpi-collaborate` fixture runner now supports generalized multi-peer exchange and explicitly counted dense full-snapshot discovery, using the same core selection and merging functions. See [the reimplementation guide](docs/SONAR_REIMPLEMENTATION_GUIDE.md).
+The first independent semantic baseline adds deterministic `closest` selection of `num_collaborators` actual peers, `sum_tensor_l2` scoring, and `uniform_self_and_peers` averaging. Existing policies and defaults remain separate baselines. Training logs represent selected peer groups and joint aggregation benefit; exchange counts scale with actual collaborator count. The example is `backend/configs/train_sonar_closest.toml`. This is a serial CPU learning increment; non-IID data, other MPI policies and adaptive control remain later work. IID closest-peer training now runs on one MPI rank per client with serial-reference parity. The `mpi-collaborate` fixture runner now supports generalized multi-peer exchange and explicitly counted dense full-snapshot discovery, using the same core selection and merging functions. See [the reimplementation guide](docs/SONAR_REIMPLEMENTATION_GUIDE.md).
 
 ## Goals and boundaries
 
@@ -25,7 +25,7 @@ The first independent semantic baseline adds deterministic `closest` selection o
 
 Start with a single dataset, small model, synchronous rounds, and static client membership. A single-process simulator may coordinate execution, but clients must select peers and aggregate locally without a central model aggregator. Asynchronous training, client churn, privacy mechanisms, production deployment, and a web interface are outside the initial scope.
 
-**Mandatory distributed execution requirement:** implement the future distributed simulator using MPI through `mpi4py`, with one rank per client. Each rank owns its model, optimizer, data partition, peer history, and eventual controller state. Real MPI messages must carry peer model parameters; an in-process loop or containers alone do not satisfy this requirement. The current single-process implementation remains the reference for correctness. Optional MPI dependencies and a fixed-peer exchange demo are now implemented. MPI training integration remains future work; dense full-snapshot discovery is implemented for the collaboration fixture runner and explicitly accounted.
+**Mandatory distributed execution requirement:** implement the future distributed simulator using MPI through `mpi4py`, with one rank per client. Each rank owns its model, optimizer, data partition, peer history, and eventual controller state. Real MPI messages must carry peer model parameters; an in-process loop or containers alone do not satisfy this requirement. The current single-process implementation remains the reference for correctness. Optional MPI dependencies and a fixed-peer exchange demo are now implemented. IID closest-peer MPI training is implemented with identical initial weights and explicitly accounted dense discovery. Other policies and multi-host validation remain pending.
 
 ## Milestones and completion gates
 
@@ -75,7 +75,7 @@ Complete when every client trains and aggregates peer models, a small end-to-end
 
 ### M4 — Implement MPI distributed simulation
 
-**Partial progress:** `mpi-demo` exchanges and averages known models across real MPI ranks. `mpi-collaborate` adds multi-peer transport, dense full-snapshot discovery, closest-peer selection and local aggregation using distinct seeded fixture models. Neither runner trains models; full MPI learning remains pending. See [MPI transport instructions](docs/MPI_TRANSPORT.md). Full M4 completion still requires training/reference parity and the remaining tasks below.
+**Partial progress:** `mpi-demo` exchanges and averages known models across real MPI ranks. `mpi-collaborate` adds multi-peer transport, dense full-snapshot discovery, closest-peer selection and local aggregation using distinct seeded fixture models. The separate `mpi-train` runner trains IID MNIST clients with closest selection and validates serial-reference parity. Other policies and multi-host validation remain pending. See [MPI transport instructions](docs/MPI_TRANSPORT.md). The IID closest training/reference gate is implemented; full M4 validation and remaining tasks below still apply.
 
 Tasks:
 - Add the required MPI execution backend using `mpi4py`, with dependencies in an optional install extra so the single-process reference remains lightweight. Document a supported MPI runtime and launcher. Require the rank count to equal the configured client count; use stable rank-to-client mapping.
@@ -135,7 +135,7 @@ Equal exchanges do not imply equal bytes or wall-clock time. Report those costs 
 2. **Implemented:** uniform-random and fixed exploration outside the Top-K pool. The existing history-based exploration primitive remains distinct.
 3. **Partially implemented:** PyTorch MNIST gossip learning with a configurable small MLP, ten clients by default, IID partitions, identical initialization, fixed local steps, and Top-K/random/fixed-exploration policies. Non-IID partitions and controlled paired policy comparisons remain pending.
 4. Add synthetic detector tests and adaptive Normal/Exploring/Cooldown control, requiring concentration AND validation stagnation.
-5. **Partially implemented:** the MPI/mpi4py model-transport demo uses one rank per client. MPI training integration (reusing the now-implemented dense discovery fixture), followed by network experiments and final evaluation, remain pending. SONAR is optional and must preserve MPI execution.
+5. **Partially implemented:** the MPI/mpi4py model-transport demo uses one rank per client. IID closest MPI training and reference parity are implemented; other policy integration, network experiments and final evaluation remain pending. SONAR is optional and must preserve MPI execution.
 
 For gossip learning, all clients train before selection/exchange. Aggregate receiver-side from immutable post-training snapshots, with default weights 0.5 own and 0.5 selected peer. The selected peer is not automatically updated. Use replaceable negative flattened-parameter distance initially. Keep training, controller-validation, and test data separate.
 
@@ -155,7 +155,7 @@ The output directory must be empty. Logs represent selections, not network trans
 
 ## Minimal IID gossip learning
 
-Implemented CPU MNIST MLP training with Top-K, random, fixed-exploration, and SONAR-style closest-peer selection, separate local validation and held-out test data, and receiver-side averaging from immutable post-training snapshots. Existing selection simulation remains available without ML dependencies. Non-IID learning, adaptive control, MPI training integration, and network experiments remain future work.
+Implemented CPU MNIST MLP training with Top-K, random, fixed-exploration, and SONAR-style closest-peer selection, separate local validation and held-out test data, and receiver-side averaging from immutable post-training snapshots. Existing selection simulation remains available without ML dependencies. Non-IID learning, adaptive control, other MPI policies and network experiments remain future work. IID closest-peer training is available through `mpi-train`.
 
 ```sh
 uv sync --project backend --extra learning --locked
@@ -168,4 +168,8 @@ Use train_random.toml or train_fixed_exploration.toml for the paired baselines. 
 
 Training now writes aggregation.jsonl and summary.txt. Each client is evaluated on the same local validation examples immediately before and after averaging. Benefit is before-loss minus after-loss: positive indicates immediate improvement, negative worsening. Logs include selected-peer L2 distance and collaboration history metrics from preceding rounds. These diagnostics do not influence selection or establish harmful collapse. Summary counts use 1e-8 tolerance for unchanged results; additional validation time is recorded separately. Estimated model bytes and exchange counts retain their previous meaning.
 
-After the documented training command, inspect `cat <output-directory>/summary.txt` and `head -n 3 <output-directory>/aggregation.jsonl`. Non-IID learning, adaptive control, MPI training integration, and network experiments remain future work.
+After the documented training command, inspect `cat <output-directory>/summary.txt` and `head -n 3 <output-directory>/aggregation.jsonl`. Non-IID learning, adaptive control, other MPI policies and network experiments remain future work. IID closest-peer training is available through `mpi-train`.
+
+## MPI training verification refinements
+
+IID MPI training now records per-phase timing, algorithm-round duration through diagnostic logging/completion, and slowest-rank round summaries. The manifest identifies dirty source checkouts and fingerprints package Python files. Small integration checks include delayed training ranks and selecting all eligible peers while preserving serial parity and actual discovery accounting. These refinements do not add new policies, datasets or deployment targets.

@@ -28,7 +28,7 @@ Use `backend/configs/top_k.toml`, `backend/configs/random.toml`, or `backend/con
 
 ## Minimal IID gossip learning
 
-Implemented CPU MNIST MLP training with Top-K, random, fixed-exploration, and SONAR-style closest-peer selection, separate local validation and held-out test data, and receiver-side averaging from immutable post-training snapshots. Existing selection simulation remains available without ML dependencies. Non-IID learning, adaptive control, MPI training integration, and network experiments remain future work.
+Implemented CPU MNIST MLP training with Top-K, random, fixed-exploration, and SONAR-style closest-peer selection, separate local validation and held-out test data, and receiver-side averaging from immutable post-training snapshots. Existing selection simulation remains available without ML dependencies. Non-IID learning, adaptive control, other MPI policies and network experiments remain future work. IID closest-peer training is available through `mpi-train`.
 
 ```sh
 uv sync --project backend --extra learning --locked
@@ -41,7 +41,7 @@ Use train_random.toml or train_fixed_exploration.toml for the paired baselines. 
 
 Training now writes aggregation.jsonl and summary.txt. Each client is evaluated on the same local validation examples immediately before and after averaging. Benefit is before-loss minus after-loss: positive indicates immediate improvement, negative worsening. Logs include selected-peer L2 distance and collaboration history metrics from preceding rounds. These diagnostics do not influence selection or establish harmful collapse. Summary counts use 1e-8 tolerance for unchanged results; additional validation time is recorded separately. Estimated model bytes and exchange counts retain their previous meaning.
 
-After the documented training command, inspect `cat <output-directory>/summary.txt` and `head -n 3 <output-directory>/aggregation.jsonl`. Non-IID learning, adaptive control, MPI training integration, and network experiments remain future work.
+After the documented training command, inspect `cat <output-directory>/summary.txt` and `head -n 3 <output-directory>/aggregation.jsonl`. Non-IID learning, adaptive control, other MPI policies and network experiments remain future work. IID closest-peer training is available through `mpi-train`.
 
 ## Test verification modes
 
@@ -80,4 +80,8 @@ See [the reimplementation guide](../docs/SONAR_REIMPLEMENTATION_GUIDE.md) for up
 
 ## MPI core collaboration
 
-The `mpi-collaborate` command runs independent ranks using multi-peer transfers, dense frozen-model discovery, closest selection and receiver-local aggregation. It reuses discovered snapshots and counts discovery traffic separately from selected model contributions. This is a seeded fixture simulation without training; see [MPI launch instructions](../docs/MPI_TRANSPORT.md#multi-peer-core-collaboration) for the four-client example, outputs and limitations. MPI training remains the next integration step.
+The `mpi-collaborate` command runs independent ranks using multi-peer transfers, dense frozen-model discovery, closest selection and receiver-local aggregation. It reuses discovered snapshots and counts discovery traffic separately from selected model contributions. This is a seeded fixture simulation without training; see [MPI launch instructions](../docs/MPI_TRANSPORT.md#multi-peer-core-collaboration) for the four-client example, outputs and limitations. IID closest-peer MPI training is available through `mpi-train`; see the training section of the MPI guide.
+
+## IID MPI training
+
+Use `mpi-train` with `backend/configs/train_mpi_closest.toml` to run real MNIST training on three client ranks. Each rank owns its SGD optimizer, data partition and persistent minibatch iterator, then discovers frozen peer models and averages locally. Initial weights and partition/batch schedules match the serial reference. This increment supports closest selection only; full discovery traffic is counted and selected snapshots are reused. See [MPI training instructions](../docs/MPI_TRANSPORT.md#iid-training-across-mpi-ranks) for installation, launch commands, outputs, parity tolerances and current single-host limitations.

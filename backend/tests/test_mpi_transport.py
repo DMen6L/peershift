@@ -78,7 +78,7 @@ def test_demo_matches_frozen_snapshot_reference(tmp_path, pattern):
         assert summary['sent_model_messages'] == summary['received_model_messages'] == 9
         assert summary['sent_model_bytes'] == summary['received_model_bytes']
     repeat = [json.loads(line) for line in (tmp_path/'b/exchanges.jsonl').read_text().splitlines()]
-    timings = ('exchange_seconds', 'synchronization_seconds')
+    timings = ('exchange_seconds', 'synchronization_seconds', 'metadata_collective_seconds', 'model_payload_seconds')
     # Logging sizes include encoded timing strings, so are also timing-dependent.
     ignored = (*timings, 'logging_local_encoded_bytes')
     assert [{k: v for k, v in row.items() if k not in ignored} for row in rows] == [
