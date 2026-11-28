@@ -16,15 +16,20 @@ def main():
     mpi_demo = commands.add_parser("mpi-demo", help="Exchange known models across MPI ranks without training")
     mpi_demo.add_argument("--config", required=True)
     mpi_demo.add_argument("--output", required=True)
+    collaborate = commands.add_parser("mpi-collaborate", help="Discover, select and merge peer models across MPI ranks; no training")
+    collaborate.add_argument("--config", required=True)
+    collaborate.add_argument("--output", required=True)
     args = parser.parse_args()
     try:
-        if args.command == "mpi-demo":
+        if args.command in ("mpi-demo", "mpi-collaborate"):
             try:
                 from .mpi_demo import run_demo
+                from .mpi_collaboration import run_collaboration
                 from mpi4py import MPI
             except (ImportError, RuntimeError) as error:
                 parser.error(f"MPI requires a compatible MPI runtime and: uv sync --project backend --extra mpi ({error})")
-            run_demo(args.config, args.output)
+            runner = run_demo if args.command == "mpi-demo" else run_collaboration
+            runner(args.config, args.output)
         elif args.command == "train":
             try:
                 from .training import TrainingConfig, run_training

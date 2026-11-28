@@ -27,7 +27,7 @@ PeerShift introduces two additional components:
 
 The final implementation will evaluate these components within a decentralized training environment.
 
-**Required future execution model: MPI.** The distributed simulator must use `mpi4py`, with one MPI process (rank) per client and actual model-parameter messages between peers. Each rank owns its model, optimizer, data partition, and selection history, and performs receiver-side aggregation locally. The existing single-process simulator remains the correctness reference. The fixed-peer MPI model-transport demo is implemented; integration with actual training and distributed similarity discovery remains future work.
+**Required future execution model: MPI.** The distributed simulator must use `mpi4py`, with one MPI process (rank) per client and actual model-parameter messages between peers. Each rank owns its model, optimizer, data partition, and selection history, and performs receiver-side aggregation locally. The existing single-process simulator remains the correctness reference. Fixed-peer MPI transport and dense discovery with local closest-peer collaboration are implemented as fixtures; integration with actual training remains future work.
 
 ## Technologies
 
@@ -52,7 +52,7 @@ Implemented:
 
 These functions provide the foundation for future collapse detection and adaptive peer-selection experiments.
 
-Single-process MNIST gossip learning is implemented for IID Top-K, random, and fixed-exploration experiments. MPI ranks can exchange and average known models using fixed peer patterns; MPI training, similarity discovery, and adaptive exploration remain future work.
+Single-process MNIST gossip learning is implemented for IID Top-K, random, and fixed-exploration experiments. MPI ranks can exchange models using fixed patterns or discover all frozen models and select closest collaborators locally. MPI training and adaptive exploration remain future work.
 
 ## Roadmap
 
@@ -125,8 +125,12 @@ After the documented training command, inspect `cat <output-directory>/summary.t
 
 ## MPI model transport demo
 
-The first MPI increment runs separate client processes exchanging frozen MLP parameters and averaging locally, without training or MNIST. See [MPI_TRANSPORT.md](docs/MPI_TRANSPORT.md) for install/run commands, fixture patterns, communication accounting, protocol limits and tests. This is a partial M4 implementation; distributed training and Top-K discovery remain pending.
+The first MPI increment runs separate client processes exchanging frozen MLP parameters and averaging locally, without training or MNIST. See [MPI_TRANSPORT.md](docs/MPI_TRANSPORT.md) for install/run commands, fixture patterns, communication accounting, protocol limits and tests. This is a partial M4 implementation; distributed training remains pending; the collaboration fixture below adds accounted dense discovery.
 
 ## SONAR-style core baseline
 
 The independent SONAR migration now includes `closest` selection of multiple actual collaborators, summed tensor-L2 distance, and equal self-plus-peers model averaging. Run the training command with `backend/configs/train_sonar_closest.toml`; see [backend instructions](backend/README.md#sonar-style-closest-collaborators) for settings and multi-peer diagnostics. Existing Top-K pool sampling, random and fixed exploration remain available with their original defaults. This serial baseline does not yet connect training to MPI or reproduce SONAR's heterogeneous experiments.
+
+## MPI core collaboration
+
+The `mpi-collaborate` command runs independent ranks using multi-peer transfers, dense frozen-model discovery, closest selection and receiver-local aggregation. It reuses discovered snapshots and counts discovery traffic separately from selected model contributions. This is a seeded fixture simulation without training; see [MPI launch instructions](docs/MPI_TRANSPORT.md#multi-peer-core-collaboration) for the four-client example, outputs and limitations. MPI training remains the next integration step.
