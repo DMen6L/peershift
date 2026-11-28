@@ -1,6 +1,6 @@
 # MPI model transport prototype
 
-This feature exchanges actual MLP parameter buffers between independent MPI ranks and averages only at each receiver. The original `mpi-demo` does not train models, load MNIST, or discover similar peers. The `mpi-collaborate` increment below adds dense discovery and core selection/merging without training. It is the transport prerequisite for the future MPI learning runner.
+This feature exchanges actual MLP parameter buffers between independent MPI ranks and averages only at each receiver. The original `mpi-demo` does not train models, load MNIST, or discover similar peers. The `mpi-collaborate` increment below adds dense discovery and core selection/merging without training. These fixtures isolate transport behavior; the separate `mpi-train` runner described below now integrates IID closest-peer learning.
 
 ## Install and run
 
@@ -94,3 +94,43 @@ Dense exact discovery is a correctness reference, not sparse or communication-ef
 Outputs also include resolved `config.toml`, `manifest.json`, human/machine summaries and each rank's `rank-<id>/final_model.pt` checkpoint. Models are written by their owning ranks, not gathered by rank zero. The manifest records the Git revision when available, dependencies, fixture initialization and discovery mode. `runtime_seconds` is rank zero's elapsed time through result collection/checkpoint writing, before final synchronization. Checkpoints can be loaded with `torch.load(path, weights_only=True)` for small serial-reference comparisons. This runner assumes a shared output path on one host; multi-host deployment remains unvalidated.
 
 Separate-process reproducibility compares model tensors and deterministic record values, excluding timing fields and timing-dependent logging sizes. Verification uses the strict learning/MPI suite above, real launchers with process-group timeouts, full-tensor serial references, malformed inputs and large multi-request payloads. MPI training, non-IID data, adaptive exploration and network experiments remain future increments.
+
+## IID training across MPI ranks
+
+`mpi-train` connects local MNIST learning to the same real model transport. Each rank owns one MLP, SGD optimizer, IID training/validation indices, persistent minibatch iterator and collaboration history. Initial weights are identical across clients. The first training increment supports `policy="closest"` only, with both existing distance metrics and both aggregation rules. Other policies remain available in the serial `train` command.
+
+From the repository root, after installing the learning and MPI extras:
+
+```sh
+training_output=$(mktemp -d /tmp/peershift-mpi-training.XXXXXX)
+mpiexec -n 3 backend/.venv/bin/python -m peershift mpi-train \
+  --config backend/configs/train_mpi_closest.toml --output "$training_output" --download
+cat "$training_output/summary.txt"
+head -n 3 "$training_output/evaluations.jsonl"
+```
+
+Only rank zero downloads missing MNIST files. Other ranks wait for its setup result, then open the shared cache with downloads disabled. Omit `--download` once cached. Missing data or root setup errors terminate the job; inconsistent dataset sizes are rejected collectively. Unexpected rank-local training, evaluation or output failures abort the MPI job. Automated launchers must still enforce process-group timeouts; this is not rank-failure recovery.
+
+The small profile uses three clients, three rounds, two local steps per round, batch size sixteen, 64 training and sixteen validation examples per client, 64 held-out test examples, and hidden size sixteen. The default seed is 42. Each receiver selects one closest peer and averages at weights 1/2 self, 1/2 peer. Change `num_collaborators` to use multiple peers (strictly less than client count); `own_weight` controls only `fixed_self` averaging. Configuration is the same `TrainingConfig` used by serial training, so the profile can also be passed to `peershift train` for a reference run. Rank count must match `num_clients`, and output directories must be empty.
+
+### Training rounds and reference parity
+
+Each rank trains for exactly `local_steps` using only its assigned training subset. Iterators retain their position and shuffle-generator state across rounds and epoch boundaries. All ranks finish training and freeze snapshots before discovery payloads are posted. Each receives all other clients' snapshots, selects collaborators locally, and aggregates only at the receiver. No centralized model aggregator exists. Discovery snapshots selected for averaging are reused without retransmission.
+
+Partition generation and client initialization are shared with the serial runner. Minibatch shuffles use an independent generator seeded with `seed + client_id + 1`. Received tensors are restored to the serial model's state-dictionary order before scoring, avoiding distance-rounding differences from alphabetical packing. The parity contract is same configurations, corpus, partitions, initial weights, batches, peer choices and complete updated tensors, with float32 `rtol=1e-6`, `atol=1e-6`. Current verification is single-host CPU with the deterministic MLP and `ToTensor`; it does not extend to random transforms, dropout, arbitrary architectures or cross-platform bitwise equivalence.
+
+Local validation is evaluated immediately before and after merging. Held-out test results are observational and never enter selection or aggregation. Initial evaluation uses round -1. Positive aggregation benefit is the validation-loss reduction from the entire merge; it does not attribute benefit to an individual peer or establish long-term improvement. Non-IID learning and adaptive exploration remain future work.
+
+### Training outputs and costs
+
+- `config.toml`, `partitions.json` and `manifest.json`: resolved settings, exact disjoint train/validation indices, held-out test indices, initial-model fingerprint, code/runtime versions and discovery semantics.
+- `selections.jsonl`, `evaluations.jsonl` and `aggregation.jsonl`: serial-compatible closest-policy records, ordered by round then client. Root gathers diagnostics only; all scoring, evaluation and aggregation happen at the owning rank.
+- `exchanges.jsonl`: real discovery message/byte counts, selected snapshot hashes, pre-/post-training and merged hashes, timings and source-preservation checks. `snapshot_sha256` is the frozen post-training source. `pre_training_sha256` is the model immediately before local steps.
+- `rank-<id>/final_model.pt`: each rank writes its own final model, loadable with `torch.load(path, weights_only=True)`.
+- `summary.json` and `summary.txt`: learning diagnostics, local-step/event counts, actual discovery payload totals, selected contributions, and zero selected-payload retransmissions.
+
+The default profile has **nine aggregation events, eighteen total local steps, eighteen discovery transfers and nine selected contributions**. Discovery counts follow R×N×(N−1), while selected contributions follow R×N×m. Contributions are not extra transfers; sent and received totals describe the same traffic. Metadata and logging counters measure logical JSON records/collective participation, excluding setup broadcasts, initial-evaluation gathering, final checkpoint synchronization and MPI framing. Wire bytes remain unmeasured. Full model discovery is dense, not sparse communication.
+
+`runtime_seconds` covers MPI setup (including loading/downloading), training, communication, evaluations and checkpoint completion before root writes the summary. Per-rank `training_seconds`, `round_seconds` and pre-aggregation validation time are recorded separately. Summary `additional_validation_seconds` sums rank times; it is not parallel wall time. The serial runner's existing runtime boundary differs, so do not interpret their raw runtime fields as a controlled performance comparison.
+
+The strict suite includes real MPI training with offline deterministic datasets, serial-reference comparison of choices/diagnostics/final tensors, epoch-boundary continuation, separate-launch reproducibility, root-only download calls and bounded setup/local-training failure cases. Small cached-MNIST runs are execution checks, not evidence of policy superiority. Multi-host runs, non-IID partitions, other MPI policies, adaptive control and network experiments remain pending.

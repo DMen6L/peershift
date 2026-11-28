@@ -101,36 +101,60 @@ def _benefit_summary(benefits):
     )
 
 
+def load_datasets(config, download=False):
+    """Open MNIST; MPI callers serialize downloads at rank zero."""
+    from torchvision.datasets import MNIST
+    from torchvision.transforms import ToTensor
+    return (MNIST(config.data_dir, train=True, transform=ToTensor(), download=download),
+            MNIST(config.data_dir, train=False, transform=ToTensor(), download=download))
+
+
+def training_partitions(config, train_size, test_size):
+    """Identical IID index assignment for serial and MPI execution."""
+    required = config.num_clients*(config.train_per_client+config.validation_per_client)
+    if train_size < required or test_size < config.test_samples:
+        raise ValueError('Insufficient dataset samples')
+    indices = list(range(train_size))
+    random.Random(f'{config.seed}:partition').shuffle(indices)
+    test_indices = list(range(test_size))
+    random.Random(f'{config.seed}:test').shuffle(test_indices)
+    partitions = []
+    for i in range(config.num_clients):
+        start = i*(config.train_per_client+config.validation_per_client)
+        partitions.append(dict(train=indices[start:start+config.train_per_client],
+                               validation=indices[start+config.train_per_client:start+config.train_per_client+config.validation_per_client]))
+    return dict(clients=partitions, test=test_indices[:config.test_samples])
+
+
+def make_client(config, train, partition, initial, client_id):
+    """Own model/SGD and persistent, explicitly seeded minibatch iterator."""
+    model = make_model(config.hidden_size)
+    model.load_state_dict(initial)
+    generator = torch.Generator().manual_seed(config.seed+client_id+1)
+    loader = DataLoader(Subset(train, partition['train']), batch_size=config.batch_size,
+                        shuffle=True, generator=generator)
+    validation = DataLoader(Subset(train, partition['validation']), batch_size=config.batch_size)
+    return LearningClient(model, torch.optim.SGD(model.parameters(), lr=config.learning_rate),
+                          cycle(loader), validation, deque(maxlen=config.history_window))
+
+
 def run_training(config, output, datasets=None, download=False):
     output = Path(output)
     if output.exists() and any(output.iterdir()):
         raise ValueError('Output directory must be empty')
     if datasets is None:
-        from torchvision.datasets import MNIST
-        from torchvision.transforms import ToTensor
-        datasets = (MNIST(config.data_dir, train=True, transform=ToTensor(), download=download),
-                    MNIST(config.data_dir, train=False, transform=ToTensor(), download=download))
+        datasets = load_datasets(config, download)
     train, test = datasets
-    required = config.num_clients*(config.train_per_client+config.validation_per_client)
-    if len(train)<required or len(test)<config.test_samples:
-        raise ValueError('Insufficient dataset samples')
+    partition_data = training_partitions(config, len(train), len(test))
     torch.set_num_threads(1)
     torch.use_deterministic_algorithms(True)
     torch.manual_seed(config.seed)
     initial = snapshot(make_model(config.hidden_size))
-    indices=list(range(len(train))); random.Random(f'{config.seed}:partition').shuffle(indices)
-    test_indices=list(range(len(test))); random.Random(f'{config.seed}:test').shuffle(test_indices)
-    partitions=[]; clients=[]
-    for i in range(config.num_clients):
-        start=i*(config.train_per_client+config.validation_per_client)
-        training=indices[start:start+config.train_per_client]
-        validation=indices[start+config.train_per_client:start+config.train_per_client+config.validation_per_client]
-        partitions.append(dict(train=training,validation=validation))
-        model=make_model(config.hidden_size); model.load_state_dict(initial)
-        generator=torch.Generator().manual_seed(config.seed+i+1)
-        loader=DataLoader(Subset(train,training),batch_size=config.batch_size,shuffle=True,generator=generator)
-        clients.append(LearningClient(model,torch.optim.SGD(model.parameters(),lr=config.learning_rate),cycle(loader),DataLoader(Subset(train,validation),batch_size=config.batch_size),deque(maxlen=config.history_window)))
-    test_loader=DataLoader(Subset(test,test_indices[:config.test_samples]),batch_size=config.batch_size)
+    partitions = partition_data['clients']
+    test_indices = partition_data['test']
+    clients = [make_client(config, train, partition, initial, i)
+               for i, partition in enumerate(partitions)]
+    test_loader = DataLoader(Subset(test, test_indices), batch_size=config.batch_size)
     streams=[random.Random(f'{config.seed}:client:{i}') for i in range(config.num_clients)]
     exploration_streams=[random.Random(f'{config.seed}:exploration:{i}') for i in range(config.num_clients)]
     output.mkdir(parents=True,exist_ok=True)

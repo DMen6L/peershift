@@ -19,9 +19,21 @@ def main():
     collaborate = commands.add_parser("mpi-collaborate", help="Discover, select and merge peer models across MPI ranks; no training")
     collaborate.add_argument("--config", required=True)
     collaborate.add_argument("--output", required=True)
+    mpi_train = commands.add_parser("mpi-train", help="Train IID MNIST clients across MPI ranks using closest peers")
+    mpi_train.add_argument("--config", required=True)
+    mpi_train.add_argument("--output", required=True)
+    mpi_train.add_argument("--download", action="store_true")
     args = parser.parse_args()
     try:
-        if args.command in ("mpi-demo", "mpi-collaborate"):
+        if args.command == "mpi-train":
+            try:
+                from .mpi_training import run_mpi_training
+                from mpi4py import MPI
+                import torchvision
+            except (ImportError, RuntimeError) as error:
+                parser.error(f"MPI training requires MPI and: uv sync --project backend --extra learning --extra mpi ({error})")
+            run_mpi_training(args.config, args.output, download=args.download)
+        elif args.command in ("mpi-demo", "mpi-collaborate"):
             try:
                 from .mpi_demo import run_demo
                 from .mpi_collaboration import run_collaboration
