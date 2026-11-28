@@ -28,13 +28,15 @@ def parse(path):
     return [json.loads(line) for line in path.read_text().splitlines()]
 
 
-@pytest.mark.parametrize('metric,rule,clients,count', [
-    ('flat_l2','fixed_self',3,1),
-    ('flat_l2','uniform_self_and_peers',4,2),
-    ('sum_tensor_l2','fixed_self',4,2),
-    ('sum_tensor_l2','uniform_self_and_peers',3,1),
+@pytest.mark.parametrize('metric,rule,clients,count,delayed', [
+    ('flat_l2','fixed_self',3,1,False),
+    ('flat_l2','uniform_self_and_peers',4,2,False),
+    ('sum_tensor_l2','fixed_self',4,2,False),
+    ('sum_tensor_l2','uniform_self_and_peers',3,1,False),
+    ('sum_tensor_l2','uniform_self_and_peers',3,2,False),
+    ('sum_tensor_l2','uniform_self_and_peers',3,1,True),
 ])
-def test_mpi_training_matches_serial_tensors_and_observations(tmp_path, monkeypatch, metric, rule, clients, count):
+def test_mpi_training_matches_serial_tensors_and_observations(tmp_path, monkeypatch, metric, rule, clients, count, delayed):
     import torch
     from torch.utils.data import TensorDataset
     import peershift.training as training
@@ -54,7 +56,20 @@ def test_mpi_training_matches_serial_tensors_and_observations(tmp_path, monkeypa
         return client
     monkeypatch.setattr(training,'LearningClient',capture)
     training.run_training(cfg,tmp_path/'serial',datasets=(make_data(123),make_data(456)))
-    result=launch(DIRECT,config,tmp_path/'mpi',ranks=clients,timeout=60)
+    script = DIRECT
+    if delayed:
+        script = FIXTURE + """
+import sys,time
+from mpi4py import MPI
+import peershift.mpi_training as training
+original=training.local_train
+def slow_train(*args,**kwargs):
+    if MPI.COMM_WORLD.rank==1: time.sleep(.2)
+    return original(*args,**kwargs)
+training.local_train=slow_train
+training.run_mpi_training(sys.argv[1],sys.argv[2],datasets=datasets)
+"""
+    result=launch(script,config,tmp_path/'mpi',ranks=clients,timeout=60)
     assert result.returncode==0,result.stderr
     assert training.TrainingConfig.load(tmp_path/'mpi/config.toml')==cfg
     for name in ('partitions.json','manifest.json'):
@@ -73,6 +88,17 @@ def test_mpi_training_matches_serial_tensors_and_observations(tmp_path, monkeypa
     rows=parse(tmp_path/'mpi/exchanges.jsonl')
     assert len(rows)==clients*cfg.rounds
     payload=sum(value.numel()*value.element_size() for value in captured[0].model.state_dict().values())
+    for step in range(cfg.rounds):
+        group=rows[step*clients:(step+1)*clients]
+        maximum=max(row['round_seconds'] for row in group)
+        assert all(row['max_round_seconds']==maximum for row in group)
+        for row in group:
+            components=('training_seconds','additional_validation_seconds','training_alignment_seconds',
+                        'exchange_seconds','selection_aggregation_seconds','post_aggregation_evaluation_seconds',
+                        'logging_gather_seconds','logging_write_seconds','round_completion_wait_seconds')
+            assert all(row[key]>=0 for key in components)
+            assert row['round_seconds']>=sum(row[key] for key in components)
+            assert row['exchange_seconds']>=row['metadata_collective_seconds']+row['model_payload_seconds']+row['synchronization_seconds']
     for row in rows:
         assert row['snapshot_sha256']!=row['pre_training_sha256']
         assert row['source_snapshot_unchanged'] and row['selected_snapshot_reuse']
@@ -83,6 +109,8 @@ def test_mpi_training_matches_serial_tensors_and_observations(tmp_path, monkeypa
             assert digest==source['snapshot_sha256']
     summary=json.loads((tmp_path/'mpi/summary.json').read_text())
     assert summary['training'] is True
+    assert summary['total_max_round_seconds']==sum(row['max_round_seconds'] for row in summary['round_timings'])
+    assert summary['training_alignment_calls']==summary['round_completion_calls']==summary['round_timing_collective_calls']==clients*cfg.rounds
     assert summary['local_steps']==clients*cfg.rounds*cfg.local_steps
     assert summary['aggregation_events']==clients*cfg.rounds
     assert summary['selected_model_contributions']==clients*cfg.rounds*count

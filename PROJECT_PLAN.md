@@ -169,3 +169,7 @@ Use train_random.toml or train_fixed_exploration.toml for the paired baselines. 
 Training now writes aggregation.jsonl and summary.txt. Each client is evaluated on the same local validation examples immediately before and after averaging. Benefit is before-loss minus after-loss: positive indicates immediate improvement, negative worsening. Logs include selected-peer L2 distance and collaboration history metrics from preceding rounds. These diagnostics do not influence selection or establish harmful collapse. Summary counts use 1e-8 tolerance for unchanged results; additional validation time is recorded separately. Estimated model bytes and exchange counts retain their previous meaning.
 
 After the documented training command, inspect `cat <output-directory>/summary.txt` and `head -n 3 <output-directory>/aggregation.jsonl`. Non-IID learning, adaptive control, other MPI policies and network experiments remain future work. IID closest-peer training is available through `mpi-train`.
+
+## MPI training verification refinements
+
+IID MPI training now records per-phase timing, algorithm-round duration through diagnostic logging/completion, and slowest-rank round summaries. The manifest identifies dirty source checkouts and fingerprints package Python files. Small integration checks include delayed training ranks and selecting all eligible peers while preserving serial parity and actual discovery accounting. These refinements do not add new policies, datasets or deployment targets.

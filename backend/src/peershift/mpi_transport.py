@@ -64,7 +64,9 @@ class MPITransport:
             metadata['error'] = str(error)
         # Logical encoded JSON sizes exclude MPI framing/pickle/collective overhead.
         encoded = json.dumps(metadata, sort_keys=True, separators=(',', ':')).encode()
+        metadata_started = MPI.Wtime()
         gathered = self.comm.allgather(encoded)
+        metadata_seconds = MPI.Wtime()-metadata_started
         table = [json.loads(value) for value in gathered]
         failures = [f"rank {row['rank']}: {row['error']}" for row in table if row['error']]
         if failures:
@@ -85,6 +87,7 @@ class MPITransport:
         # A private communicator, explicit sources and completed serial rounds
         # permit tag reuse without cross-round matching. Keep all buffers alive.
         try:
+            payload_started = MPI.Wtime()
             requests = [self.comm.Irecv([buffer, MPI.FLOAT], source=peer, tag=0)
                         for peer, buffer in zip(peers, received)]
             requests.extend(self.comm.Isend([packed.values, MPI.FLOAT], dest=rank, tag=0)
@@ -113,6 +116,8 @@ class MPITransport:
                        metadata_collective_calls=1, synchronization_calls=1,
                        exchange_seconds=finished-started,
                        synchronization_seconds=finished-sync_started,
+                       metadata_collective_seconds=metadata_seconds,
+                       model_payload_seconds=sync_started-payload_started,
                        snapshot_sha256=packed.digest,
                        received_sha256s=[buffer.digest for buffer in buffers])
         return tuple(buffer.state_dict() for buffer in buffers), metrics
